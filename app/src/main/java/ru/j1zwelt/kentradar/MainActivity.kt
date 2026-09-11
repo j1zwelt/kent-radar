@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -25,6 +30,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,7 +39,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -83,9 +91,19 @@ fun KentRadarApp() {
             }
         }) {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-            Text(
-                text = "Android", modifier = Modifier.padding(innerPadding)
-            )
+            when (currentDestination) {
+                AppDestinations.MAP -> {
+                    Map(modifier = Modifier.padding(innerPadding))
+                }
+
+                AppDestinations.FRIENDS -> {
+                    Friends(modifier = Modifier.padding(innerPadding))
+                }
+
+                AppDestinations.PROFILE -> {
+                    Profile(modifier = Modifier.padding(innerPadding))
+                }
+            }
         }
     }
 }
@@ -106,7 +124,54 @@ fun AuthScreen() {
             "sign_in" -> SingIn(Modifier.padding(innerPadding))
             "register" -> Register(Modifier.padding(innerPadding))
         }
+    }
+}
 
+@Composable
+fun Map(modifier: Modifier = Modifier) {
+    Text("Map", modifier = modifier)
+}
+
+@Composable
+fun Friends(modifier: Modifier = Modifier) {
+    Text("Friends", modifier = modifier)
+}
+
+@Composable
+fun Profile(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        var userName by remember { mutableStateOf("Загрузка...") }
+        val database = Firebase.database
+        val nameRef = database.getReference("${currentUser!!.uid}/name")
+
+        Image(
+            painter = painterResource(R.drawable.ic_account_box),
+            contentDescription = "Аватарка кента",
+            modifier = modifier
+                .size(160.dp)
+                .clip(CircleShape)
+                .border(
+                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                    shape = CircleShape
+                ),
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        LaunchedEffect(Unit) {
+            nameRef.get().addOnSuccessListener { snapshot ->
+                userName = snapshot.value.toString()
+            }
+        }
+
+        Text(text = userName, style = MaterialTheme.typography.headlineSmall)
     }
 }
 
@@ -126,7 +191,7 @@ fun Register(modifier: Modifier = Modifier) {
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -199,9 +264,14 @@ fun Register(modifier: Modifier = Modifier) {
                         val auth = Firebase.auth.createUserWithEmailAndPassword(email, password1)
                         auth.addOnSuccessListener {
                             currentUser = it.user
+                            val uid = currentUser!!.uid
                             val database = Firebase.database
-                            val nameRef = database.getReference("$userName/name")
-                            nameRef.setValue(name.ifEmpty { userName })
+                            val userNameRef = database.getReference("$uid/userName")
+                            val nameRef = database.getReference("$uid/name")
+                            val uidRef = database.getReference("$userName/uid")
+                            userNameRef.setValue(userName)
+                            nameRef.setValue(name)
+                            uidRef.setValue(uid)
                         }
                         auth.addOnFailureListener {
                             scope.launch {
@@ -258,7 +328,7 @@ fun SingIn(modifier: Modifier = Modifier) {
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
