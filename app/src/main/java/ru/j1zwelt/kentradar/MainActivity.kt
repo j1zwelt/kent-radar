@@ -20,9 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -40,7 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -139,39 +138,97 @@ fun Friends(modifier: Modifier = Modifier) {
 
 @Composable
 fun Profile(modifier: Modifier = Modifier) {
+    val loadingStr = stringResource(R.string.loading)
+
+    var userName by remember { mutableStateOf(loadingStr) }
+    var name by remember { mutableStateOf(loadingStr) }
+
+    val database = Firebase.database
+    val userNameRef = database.getReference("${currentUser!!.uid}/userName")
+    val nameRef = database.getReference("${currentUser!!.uid}/name")
+
+    LaunchedEffect(key1 = Unit) {
+        userNameRef.get().addOnSuccessListener { snapshot ->
+            if (snapshot.exists()) userName = snapshot.value.toString()
+        }
+
+        nameRef.get().addOnSuccessListener { snapshot ->
+            if (snapshot.exists()) name = snapshot.value.toString()
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.Center,
+            .padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        var userName by remember { mutableStateOf("Загрузка...") }
-        val database = Firebase.database
-        val nameRef = database.getReference("${currentUser!!.uid}/name")
+        Spacer(modifier = Modifier.height(48.dp))
 
         Image(
-            painter = painterResource(R.drawable.ic_account_box),
-            contentDescription = "Аватарка кента",
-            modifier = modifier
+            painter = painterResource(id = R.drawable.ic_account_box),
+            contentDescription = stringResource(id = R.string.my_photo),
+            modifier = Modifier
                 .size(160.dp)
                 .clip(CircleShape)
                 .border(
-                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                    border = BorderStroke(3.dp, MaterialTheme.colorScheme.primary),
                     shape = CircleShape
                 ),
             contentScale = ContentScale.Crop
         )
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = userName,
+            onValueChange = { userName = it },
+            label = { Text(stringResource(R.string.username)) },
+            leadingIcon = {
+                Text(
+                    text = "@",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
         Spacer(modifier = Modifier.height(8.dp))
 
-        LaunchedEffect(Unit) {
-            nameRef.get().addOnSuccessListener { snapshot ->
-                userName = snapshot.value.toString()
-            }
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text(stringResource(R.string.name)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                userNameRef.setValue(userName)
+                nameRef.setValue(name)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = userName != loadingStr && name != loadingStr
+        ) {
+            Text(stringResource(R.string.save_changes))
         }
 
-        Text(text = userName, style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = {
+                Firebase.auth.signOut()
+                currentUser = null
+            }, modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.sign_out))
+        }
     }
 }
 
@@ -179,8 +236,10 @@ fun Profile(modifier: Modifier = Modifier) {
 fun Register(modifier: Modifier = Modifier) {
     val snackBarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
     val errorMessage = stringResource(R.string.unknown_error)
     val errorMessage2 = stringResource(R.string.passwords_do_not_match)
+
     var email by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
@@ -197,9 +256,10 @@ fun Register(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = stringResource(R.string.create_new_profile),
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(bottom = 16.dp)
+                style = MaterialTheme.typography.headlineSmall
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email,
@@ -216,6 +276,13 @@ fun Register(modifier: Modifier = Modifier) {
                 value = userName,
                 onValueChange = { userName = it },
                 label = { Text(stringResource(R.string.username)) },
+                leadingIcon = {
+                    Text(
+                        text = "@",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
@@ -256,7 +323,7 @@ fun Register(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
@@ -269,7 +336,7 @@ fun Register(modifier: Modifier = Modifier) {
                             val userNameRef = database.getReference("$uid/userName")
                             val nameRef = database.getReference("$uid/name")
                             val uidRef = database.getReference("$userName/uid")
-                            userNameRef.setValue(userName)
+                            userNameRef.setValue(userName.replace("@", ""))
                             nameRef.setValue(name)
                             uidRef.setValue(uid)
                         }
@@ -296,13 +363,11 @@ fun Register(modifier: Modifier = Modifier) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Button(
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.primary
-                ), onClick = {
+            OutlinedButton(
+                onClick = {
                     currentAuthScreen = "sign_in"
-                }) {
+                }, modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(stringResource(R.string.sign_in))
             }
         }
@@ -320,7 +385,9 @@ fun Register(modifier: Modifier = Modifier) {
 fun SingIn(modifier: Modifier = Modifier) {
     val snackBarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
     val errorMessage = stringResource(R.string.unknown_error)
+
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
@@ -334,9 +401,10 @@ fun SingIn(modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = stringResource(R.string.log_in_to_your_profile),
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(bottom = 16.dp)
+                style = MaterialTheme.typography.headlineSmall
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email,
@@ -359,7 +427,7 @@ fun SingIn(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
@@ -383,13 +451,11 @@ fun SingIn(modifier: Modifier = Modifier) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Button(
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.primary
-                ), onClick = {
+            OutlinedButton(
+                onClick = {
                     currentAuthScreen = "register"
-                }) {
+                }, modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(stringResource(R.string.register))
             }
         }
