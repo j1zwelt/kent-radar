@@ -11,4 +11,5 @@
     <string name="username">Username</string>
     <string name="verification_code">Verification code</string>
     <string name="passwords_do_not_match">Passwords do not match</string>
+    <string name="name">Name (not required)</string>
 </resources>

@@ -42,6 +42,7 @@ import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.compose.ui.unit.dp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.google.firebase.database.database
 import kotlinx.coroutines.launch
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 
@@ -117,6 +118,7 @@ fun Register(modifier: Modifier = Modifier) {
     val errorMessage2 = stringResource(R.string.passwords_do_not_match)
     var email by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
     var password1 by remember { mutableStateOf("") }
     var password2 by remember { mutableStateOf("") }
 
@@ -157,6 +159,17 @@ fun Register(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.name)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
                 value = password1,
                 onValueChange = { password1 = it },
                 label = { Text(stringResource(id = R.string.password)) },
@@ -185,8 +198,10 @@ fun Register(modifier: Modifier = Modifier) {
                     if (password1 == password2) {
                         val auth = Firebase.auth.createUserWithEmailAndPassword(email, password1)
                         auth.addOnSuccessListener {
-                            it.user!!.sendEmailVerification()
                             currentUser = it.user
+                            val database = Firebase.database
+                            val nameRef = database.getReference("$userName/name")
+                            nameRef.setValue(name.ifEmpty { userName })
                         }
                         auth.addOnFailureListener {
                             scope.launch {
