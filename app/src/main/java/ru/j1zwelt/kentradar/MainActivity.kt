@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,14 +82,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val database = Firebase.database
-        database.getReference("${currentUser!!.uid}/status").setValue(1)
+        if (currentUser != null) {
+            val database = Firebase.database
+            database.getReference("${currentUser!!.uid}/status").setValue(1)
+        }
     }
 
     override fun onPause() {
         super.onPause()
-        val database = Firebase.database
-        database.getReference("${currentUser!!.uid}/status").setValue(0)
+        if (currentUser != null) {
+            val database = Firebase.database
+            database.getReference("${currentUser!!.uid}/status").setValue(0)
+        }
     }
 }
 
@@ -154,8 +160,14 @@ fun Map(modifier: Modifier = Modifier) {
 @Composable
 fun Friends(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
+        val errorMessage = stringResource(R.string.failed_to_accept_the_friend_request)
+        val errorMessage2 = stringResource(R.string.failed_to_reject_the_friend_request)
+
+        var showDialog by remember { mutableStateOf(false) }
         val snackBarHostState = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
+
+        var userName by remember { mutableStateOf("") }
 
         val myFriends = "${currentUser!!.uid}/friends"
 
@@ -190,17 +202,20 @@ fun Friends(modifier: Modifier = Modifier) {
                     // TODO: показываем где наш кент на карте
                 }, onAcceptClick = {
                     val database = Firebase.database
-                    val reference =
+                    val myRef =
                         database.getReference("${currentUser!!.uid}/friends/${user.uid}")
                             .setValue(true)
-                    reference.addOnSuccessListener {
+
+                    myRef.addOnSuccessListener {
                         val index = friends.indexOf(user)
                         if (index != -1) friends[index] = user.copy(isFriend = true)
+                        database.getReference("${user.uid}/friends/${currentUser!!.uid}")
+                            .setValue(true)
                     }
 
-                    reference.addOnFailureListener {
+                    myRef.addOnFailureListener {
                         scope.launch {
-                            snackBarHostState.showSnackbar(it.localizedMessage!!)
+                            snackBarHostState.showSnackbar(it.localizedMessage ?: errorMessage)
                         }
                     }
                 }, onDismissClick = {
@@ -214,7 +229,7 @@ fun Friends(modifier: Modifier = Modifier) {
 
                     reference.addOnFailureListener {
                         scope.launch {
-                            snackBarHostState.showSnackbar(it.localizedMessage!!)
+                            snackBarHostState.showSnackbar(it.localizedMessage ?: errorMessage2)
                         }
                     }
                 })
@@ -223,7 +238,7 @@ fun Friends(modifier: Modifier = Modifier) {
 
         FloatingActionButton(
             onClick = {
-
+                showDialog = true
             }, modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
@@ -232,6 +247,55 @@ fun Friends(modifier: Modifier = Modifier) {
                 painter = painterResource(id = R.drawable.ic_add),
                 contentDescription = "Добавить кента"
             )
+        }
+
+        if (showDialog) {
+            var isNullUser by remember { mutableStateOf(false) }
+
+            AlertDialog(onDismissRequest = { showDialog = false }, title = {
+                Text(text = stringResource(R.string.sending_friend_requests))
+            }, text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = stringResource(R.string.enter_a_friend_s_username))
+
+                    OutlinedTextField(
+                        value = userName,
+                        onValueChange = { userName = it },
+                        label = { Text(stringResource(R.string.username)) },
+                        isError = isNullUser,
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }, confirmButton = {
+                TextButton(
+                    onClick = {
+                        val editUserName = userName.replace("@", "").trim()
+
+                        val database = Firebase.database
+                        val searchRef = database.getReference("users/${editUserName}").get()
+
+                        searchRef.addOnSuccessListener {
+                            if (it.exists()) {
+                                val friendUid = it.value.toString()
+                                val friendRef =
+                                    database.getReference("$friendUid/friends/${currentUser!!.uid}")
+                                friendRef.setValue(false)
+
+                                showDialog = false
+                            } else isNullUser = true
+                        }
+                    }) {
+                    Text(stringResource(R.string.send))
+                }
+            }, dismissButton = {
+                TextButton(onClick = {
+                    showDialog = false
+                }) { Text(stringResource(R.string.cancel)) }
+            })
         }
 
         SnackbarHost(
@@ -263,8 +327,9 @@ fun User(
                 .size(48.dp)
                 .clip(CircleShape)
                 .border(
-                    border = BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary),
-                    shape = CircleShape
+                    border = BorderStroke(
+                        width = 2.dp, color = MaterialTheme.colorScheme.primary
+                    ), shape = CircleShape
                 ),
             contentScale = ContentScale.Crop
         )
@@ -276,10 +341,10 @@ fun User(
             Text(user.userName, style = MaterialTheme.typography.titleMedium)
             Text(
                 text = when (user.status) {
-                    0 -> "Не в сети"
-                    1 -> "Делится местоположением"
-                    2 -> "В сети"
-                    else -> "Не в сети"
+                    0 -> stringResource(R.string.offline)
+                    1 -> stringResource(R.string.sharing_location)
+                    2 -> stringResource(R.string.online)
+                    else -> stringResource(R.string.offline)
                 }, style = MaterialTheme.typography.titleSmall
             )
         }
@@ -396,7 +461,7 @@ fun Profile(modifier: Modifier = Modifier) {
 
             Button(
                 onClick = {
-                    val newUserName = userName.replace("@", "")
+                    val newUserName = userName.replace("@", "").trim()
 
                     val usersRef = database.getReference("users")
                     val newUserNameRef = usersRef.child(newUserName).get()
@@ -557,7 +622,7 @@ fun Register(modifier: Modifier = Modifier) {
             Button(
                 onClick = {
                     if (password1 == password2) {
-                        val newUserName = userName.replace("@", "")
+                        val newUserName = userName.replace("@", "").trim()
 
                         val database = Firebase.database
                         val auth = Firebase.auth

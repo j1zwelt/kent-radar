@@ -18,4 +18,13 @@
     <string name="sign_out">Sign out</string>
     <string name="my_friends">My friends</string>
     <string name="this_username_is_already_taken_by_another_user">This username is already taken by another user</string>
+    <string name="failed_to_accept_the_friend_request">Failed to accept the friend request</string>
+    <string name="failed_to_reject_the_friend_request">Failed to reject the friend request</string>
+    <string name="offline">Offline</string>
+    <string name="online">Online</string>
+    <string name="sharing_location">Sharing location</string>
+    <string name="sending_friend_requests">Sending friend requests</string>
+    <string name="enter_a_friend_s_username">Enter a friend\'s username</string>
+    <string name="send">Send</string>
+    <string name="cancel">Cancel</string>
 </resources>
