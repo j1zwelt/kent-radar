@@ -17,9 +17,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +35,7 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,6 +55,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.database
 import kotlinx.coroutines.launch
+import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
@@ -80,10 +85,10 @@ fun KentRadarApp() {
             AppDestinations.entries.forEach {
                 item(
                     icon = {
-                        Icon(
-                            painterResource(it.icon), contentDescription = it.label
-                        )
-                    },
+                    Icon(
+                        painterResource(it.icon), contentDescription = it.label
+                    )
+                },
                     label = { Text(it.label) },
                     selected = it == currentDestination,
                     onClick = { currentDestination = it })
@@ -133,7 +138,57 @@ fun Map(modifier: Modifier = Modifier) {
 
 @Composable
 fun Friends(modifier: Modifier = Modifier) {
-    Text("Friends", modifier = modifier)
+    Box(modifier = modifier.fillMaxSize()) {
+        val myFriends = "${currentUser!!.uid}/friends"
+
+        val friends = remember { mutableStateListOf<User>() }
+
+        val database = Firebase.database
+        val friendsRef = database.getReference(myFriends)
+
+        LaunchedEffect(key1 = Unit) {
+            friendsRef.get().addOnSuccessListener {
+                if (it.exists()) for (child in it.children) {
+                    val userUid = child.key
+                    val isFriend = child.value
+
+                    val user = User(userUid!!, isFriend.toString().toBoolean())
+                    friends.add(user)
+                }
+            }
+        }
+
+        LazyColumn {
+            item {
+                Text(stringResource(R.string.my_friends))
+            }
+
+            items(friends) { user ->
+                User(user)
+            }
+        }
+
+        FloatingActionButton(
+            onClick = {
+
+            }, modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_add),
+                contentDescription = "Добавить кента"
+            )
+        }
+    }
+}
+
+@Composable
+fun User(user: User) {
+    Column {
+        Text(user.uid)
+        Text(user.isFriend.toString())
+    }
 }
 
 @Composable
@@ -148,12 +203,12 @@ fun Profile(modifier: Modifier = Modifier) {
     val nameRef = database.getReference("${currentUser!!.uid}/name")
 
     LaunchedEffect(key1 = Unit) {
-        userNameRef.get().addOnSuccessListener { snapshot ->
-            if (snapshot.exists()) userName = snapshot.value.toString()
+        userNameRef.get().addOnSuccessListener {
+            if (it.exists()) userName = it.value.toString()
         }
 
-        nameRef.get().addOnSuccessListener { snapshot ->
-            if (snapshot.exists()) name = snapshot.value.toString()
+        nameRef.get().addOnSuccessListener {
+            if (it.exists()) name = it.value.toString()
         }
     }
 
@@ -335,7 +390,7 @@ fun Register(modifier: Modifier = Modifier) {
                             val database = Firebase.database
                             val userNameRef = database.getReference("$uid/userName")
                             val nameRef = database.getReference("$uid/name")
-                            val uidRef = database.getReference("$userName/uid")
+                            val uidRef = database.getReference("users/$userName/uid")
                             userNameRef.setValue(userName.replace("@", ""))
                             nameRef.setValue(name)
                             uidRef.setValue(uid)
