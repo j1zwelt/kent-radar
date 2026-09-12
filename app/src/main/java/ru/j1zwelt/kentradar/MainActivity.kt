@@ -85,10 +85,10 @@ fun KentRadarApp() {
             AppDestinations.entries.forEach {
                 item(
                     icon = {
-                    Icon(
-                        painterResource(it.icon), contentDescription = it.label
-                    )
-                },
+                        Icon(
+                            painterResource(it.icon), contentDescription = it.label
+                        )
+                    },
                     label = { Text(it.label) },
                     selected = it == currentDestination,
                     onClick = { currentDestination = it })
@@ -151,6 +151,7 @@ fun Friends(modifier: Modifier = Modifier) {
                 if (it.exists()) for (child in it.children) {
                     val userUid = child.key
                     val isFriend = child.value
+//                    val userRef = database.getReference("$userUid")
 
                     val user = User(userUid!!, isFriend.toString().toBoolean())
                     friends.add(user)
@@ -159,10 +160,6 @@ fun Friends(modifier: Modifier = Modifier) {
         }
 
         LazyColumn {
-            item {
-                Text(stringResource(R.string.my_friends))
-            }
-
             items(friends) { user ->
                 User(user)
             }
@@ -199,15 +196,14 @@ fun Profile(modifier: Modifier = Modifier) {
     var name by remember { mutableStateOf(loadingStr) }
 
     val database = Firebase.database
-    val userNameRef = database.getReference("${currentUser!!.uid}/userName")
-    val nameRef = database.getReference("${currentUser!!.uid}/name")
+    val reference = database.getReference(currentUser!!.uid)
 
     LaunchedEffect(key1 = Unit) {
-        userNameRef.get().addOnSuccessListener {
+        reference.child("userName").get().addOnSuccessListener {
             if (it.exists()) userName = it.value.toString()
         }
 
-        nameRef.get().addOnSuccessListener {
+        reference.child("name").get().addOnSuccessListener {
             if (it.exists()) name = it.value.toString()
         }
     }
@@ -265,8 +261,8 @@ fun Profile(modifier: Modifier = Modifier) {
 
         Button(
             onClick = {
-                userNameRef.setValue(userName)
-                nameRef.setValue(name)
+                reference.child("userName").setValue(userName)
+                reference.child("name").setValue(name)
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = userName != loadingStr && name != loadingStr
@@ -294,6 +290,7 @@ fun Register(modifier: Modifier = Modifier) {
 
     val errorMessage = stringResource(R.string.unknown_error)
     val errorMessage2 = stringResource(R.string.passwords_do_not_match)
+    val errorMessage3 = stringResource(R.string.this_username_is_already_taken_by_another_user)
 
     var email by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
@@ -383,22 +380,26 @@ fun Register(modifier: Modifier = Modifier) {
             Button(
                 onClick = {
                     if (password1 == password2) {
+                        val editedUserName = userName.replace("@", "")
+
                         val auth = Firebase.auth.createUserWithEmailAndPassword(email, password1)
                         auth.addOnSuccessListener {
                             currentUser = it.user
                             val uid = currentUser!!.uid
+
                             val database = Firebase.database
-                            val userNameRef = database.getReference("$uid/userName")
-                            val nameRef = database.getReference("$uid/name")
-                            val uidRef = database.getReference("users/$userName/uid")
-                            userNameRef.setValue(userName.replace("@", ""))
-                            nameRef.setValue(name)
+                            val reference = database.getReference(uid)
+                            val uidRef = database.getReference("users/$editedUserName/uid")
+
+                            reference.child("userName").setValue(editedUserName)
+                            reference.child("name").setValue(name)
                             uidRef.setValue(uid)
                         }
+
                         auth.addOnFailureListener {
                             scope.launch {
                                 snackBarHostState.showSnackbar(
-                                    message = it.localizedMessage ?: errorMessage
+                                    it.localizedMessage ?: errorMessage
                                 )
                             }
                         }
@@ -490,6 +491,7 @@ fun SingIn(modifier: Modifier = Modifier) {
                     auth.addOnSuccessListener {
                         currentUser = it.user
                     }
+
                     auth.addOnFailureListener {
                         scope.launch {
                             snackBarHostState.showSnackbar(
