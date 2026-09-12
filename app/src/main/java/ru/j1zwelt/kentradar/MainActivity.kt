@@ -7,9 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +27,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -71,6 +76,18 @@ class MainActivity : ComponentActivity() {
                 else AuthScreen()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val database = Firebase.database
+        database.getReference("${currentUser!!.uid}/status").setValue(1)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        val database = Firebase.database
+        database.getReference("${currentUser!!.uid}/status").setValue(0)
     }
 }
 
@@ -149,17 +166,30 @@ fun Friends(modifier: Modifier = Modifier) {
                 if (it.exists()) for (child in it.children) {
                     val userUid = child.key
                     val isFriend = child.value
-//                    val userRef = database.getReference("$userUid")
+                    val userRef = database.getReference("$userUid").get()
 
-                    val user = User(userUid!!, isFriend.toString().toBoolean())
-                    friends.add(user)
+                    userRef.addOnSuccessListener { userSnap ->
+                        val userName = userSnap.child("userName").value.toString()
+                        val name = userSnap.child("name").value.toString()
+                        val status = userSnap.child("status").value.toString().toInt()
+
+                        val user =
+                            User(userUid!!, userName, name, status, isFriend.toString().toBoolean())
+                        friends.add(user)
+                    }
                 }
             }
         }
 
         LazyColumn {
             items(friends) { user ->
-                User(user)
+                User(user, onClick = {
+
+                }, onAcceptClick = {
+
+                }, onDismissClick = {
+
+                })
             }
         }
 
@@ -179,10 +209,72 @@ fun Friends(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun User(user: User) {
-    Column {
-        Text(user.uid)
-        Text(user.isFriend.toString())
+fun User(
+    user: User,
+    onClick: () -> Unit,
+    onAcceptClick: () -> Unit,
+    onDismissClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_account_box),
+            contentDescription = stringResource(id = R.string.my_photo),
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .border(
+                    border = BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary),
+                    shape = CircleShape
+                ),
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(user.name, style = MaterialTheme.typography.titleLarge)
+            Text(user.userName, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = when (user.status) {
+                    0 -> "Не в сети"
+                    1 -> "Делится местоположением"
+                    2 -> "В сети"
+                    else -> "Не в сети"
+                }, style = MaterialTheme.typography.titleSmall
+            )
+        }
+
+        if (!user.isFriend) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismissClick) {
+                    Icon(
+                        painterResource(R.drawable.ic_close),
+                        contentDescription = "Отклонить",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                IconButton(
+                    onClick = onAcceptClick, colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_check),
+                        contentDescription = "Принять",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -205,16 +297,11 @@ fun Profile(modifier: Modifier = Modifier) {
     val reference = database.getReference(currentUser!!.uid)
 
     LaunchedEffect(key1 = Unit) {
-        reference.child("userName").get().addOnSuccessListener {
+        reference.get().addOnSuccessListener {
             if (it.exists()) {
-                userName = it.value.toString()
+                userName = it.child("userName").value.toString()
                 oldUserName = userName
-            }
-        }
-
-        reference.child("name").get().addOnSuccessListener {
-            if (it.exists()) {
-                name = it.value.toString()
+                name = it.child("name").value.toString()
                 oldName = name
             }
         }
