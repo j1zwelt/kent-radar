@@ -154,6 +154,9 @@ fun Map(modifier: Modifier = Modifier) {
 @Composable
 fun Friends(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
+        val snackBarHostState = remember { SnackbarHostState() }
+        val scope = rememberCoroutineScope()
+
         val myFriends = "${currentUser!!.uid}/friends"
 
         val friends = remember { mutableStateListOf<User>() }
@@ -184,11 +187,36 @@ fun Friends(modifier: Modifier = Modifier) {
         LazyColumn {
             items(friends) { user ->
                 User(user, onClick = {
-
+                    // TODO: показываем где наш кент на карте
                 }, onAcceptClick = {
+                    val database = Firebase.database
+                    val reference =
+                        database.getReference("${currentUser!!.uid}/friends/${user.uid}")
+                            .setValue(true)
+                    reference.addOnSuccessListener {
+                        val index = friends.indexOf(user)
+                        if (index != -1) friends[index] = user.copy(isFriend = true)
+                    }
 
+                    reference.addOnFailureListener {
+                        scope.launch {
+                            snackBarHostState.showSnackbar(it.localizedMessage!!)
+                        }
+                    }
                 }, onDismissClick = {
+                    val database = Firebase.database
+                    val reference =
+                        database.getReference("${currentUser!!.uid}/friends/${user.uid}")
+                            .removeValue()
+                    reference.addOnSuccessListener {
+                        friends.remove(user)
+                    }
 
+                    reference.addOnFailureListener {
+                        scope.launch {
+                            snackBarHostState.showSnackbar(it.localizedMessage!!)
+                        }
+                    }
                 })
             }
         }
@@ -205,6 +233,13 @@ fun Friends(modifier: Modifier = Modifier) {
                 contentDescription = "Добавить кента"
             )
         }
+
+        SnackbarHost(
+            hostState = snackBarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        )
     }
 }
 
