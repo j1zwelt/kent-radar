@@ -51,6 +51,8 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.auth.ktx)
     implementation(libs.firebase.database.ktx)
+    implementation(libs.maplibre.compose)
+    runtimeOnly(libs.maplibre.compose.runtime.vulkan.android)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

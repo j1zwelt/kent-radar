@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +63,12 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.database
 import kotlinx.coroutines.launch
+import org.maplibre.compose.camera.CameraPosition
+import org.maplibre.compose.map.MapState
+import org.maplibre.compose.map.MaplibreMap
+import org.maplibre.compose.map.rememberMapState
+import org.maplibre.compose.style.BaseStyle
+import org.maplibre.spatialk.geojson.Position
 import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 
@@ -101,6 +109,24 @@ class MainActivity : ComponentActivity() {
 fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
 
+    //Map
+    val mapState = rememberMapState(
+        baseStyle = BaseStyle.Uri("https://tiles.openfreemap.org/styles/liberty"),
+        initialCameraPosition = CameraPosition(
+            target = Position(latitude = 45.521, longitude = -122.675), zoom = 17.0
+        )
+    )
+
+    //Friends
+    val friends = remember { mutableStateListOf<User>() }
+
+    //Profile
+    val loadingStr = stringResource(R.string.loading)
+    val userName = remember { mutableStateOf(loadingStr) }
+    val oldUserName = remember { mutableStateOf("") }
+    val name = remember { mutableStateOf(loadingStr) }
+    val oldName = remember { mutableStateOf("") }
+
     NavigationSuiteScaffold(
         navigationSuiteItems = {
             AppDestinations.entries.forEach {
@@ -118,15 +144,21 @@ fun KentRadarApp() {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
             when (currentDestination) {
                 AppDestinations.MAP -> {
-                    Map(modifier = Modifier.padding(innerPadding))
+                    Map(modifier = Modifier.padding(innerPadding), mapState)
                 }
 
                 AppDestinations.FRIENDS -> {
-                    Friends(modifier = Modifier.padding(innerPadding))
+                    Friends(modifier = Modifier.padding(innerPadding), friends)
                 }
 
                 AppDestinations.PROFILE -> {
-                    Profile(modifier = Modifier.padding(innerPadding))
+                    Profile(
+                        modifier = Modifier.padding(innerPadding),
+                        userName,
+                        oldUserName,
+                        name,
+                        oldName
+                    )
                 }
             }
         }
@@ -153,12 +185,28 @@ fun AuthScreen() {
 }
 
 @Composable
-fun Map(modifier: Modifier = Modifier) {
-    Text("Map", modifier = modifier)
+fun Map(modifier: Modifier = Modifier, mapState: MapState) {
+    // TODO: делаем карту
+    Box(modifier = modifier.fillMaxSize()) {
+        MaplibreMap(state = mapState)
+
+        FloatingActionButton(
+            onClick = {
+
+            }, modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_my_location),
+                contentDescription = "Мое местоположение"
+            )
+        }
+    }
 }
 
 @Composable
-fun Friends(modifier: Modifier = Modifier) {
+fun Friends(modifier: Modifier = Modifier, friends: SnapshotStateList<User>) {
     Box(modifier = modifier.fillMaxSize()) {
         val errorMessage = stringResource(R.string.failed_to_accept_the_friend_request)
         val errorMessage2 = stringResource(R.string.failed_to_reject_the_friend_request)
@@ -171,12 +219,10 @@ fun Friends(modifier: Modifier = Modifier) {
 
         val myFriends = "${currentUser!!.uid}/friends"
 
-        val friends = remember { mutableStateListOf<User>() }
-
         val database = Firebase.database
         val friendsRef = database.getReference(myFriends)
 
-        LaunchedEffect(key1 = Unit) {
+        if (friends.isEmpty()) LaunchedEffect(key1 = Unit) {
             friendsRef.get().addOnSuccessListener {
                 if (it.exists()) for (child in it.children) {
                     val userUid = child.key
@@ -188,8 +234,9 @@ fun Friends(modifier: Modifier = Modifier) {
                         val name = userSnap.child("name").value.toString()
                         val status = userSnap.child("status").value.toString().toInt()
 
-                        val user =
-                            User(userUid!!, userName, name, status, isFriend.toString().toBoolean())
+                        val user = User(
+                            userUid!!, userName, name, status, isFriend.toString().toBoolean()
+                        )
                         friends.add(user)
                     }
                 }
@@ -202,9 +249,8 @@ fun Friends(modifier: Modifier = Modifier) {
                     // TODO: показываем где наш кент на карте
                 }, onAcceptClick = {
                     val database = Firebase.database
-                    val myRef =
-                        database.getReference("${currentUser!!.uid}/friends/${user.uid}")
-                            .setValue(true)
+                    val myRef = database.getReference("${currentUser!!.uid}/friends/${user.uid}")
+                        .setValue(true)
 
                     myRef.addOnSuccessListener {
                         val index = friends.indexOf(user)
@@ -379,17 +425,18 @@ fun User(
 }
 
 @Composable
-fun Profile(modifier: Modifier = Modifier) {
+fun Profile(
+    modifier: Modifier = Modifier,
+    userName: MutableState<String>,
+    oldUserName: MutableState<String>,
+    name: MutableState<String>,
+    oldName: MutableState<String>
+) {
     val snackBarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     val loadingStr = stringResource(R.string.loading)
     val errorMessage = stringResource(R.string.unknown_error)
-
-    var userName by remember { mutableStateOf(loadingStr) }
-    var oldUserName by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf(loadingStr) }
-    var oldName by remember { mutableStateOf(loadingStr) }
 
     var userNameIsTaken by remember { mutableStateOf(false) }
 
@@ -399,10 +446,14 @@ fun Profile(modifier: Modifier = Modifier) {
     LaunchedEffect(key1 = Unit) {
         reference.get().addOnSuccessListener {
             if (it.exists()) {
-                userName = it.child("userName").value.toString()
-                oldUserName = userName
-                name = it.child("name").value.toString()
-                oldName = name
+                if (userName.value == loadingStr) userName.value =
+                    it.child("userName").value.toString()
+                if (oldUserName.value == "") oldUserName.value =
+                    userName.value
+                if (name.value == loadingStr) name.value =
+                    it.child("name").value.toString()
+                if (oldName.value == "") oldName.value =
+                    name.value
             }
         }
     }
@@ -432,8 +483,8 @@ fun Profile(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
-                value = userName,
-                onValueChange = { userName = it },
+                value = userName.value,
+                onValueChange = { userName.value = it },
                 label = { Text(stringResource(R.string.username)) },
                 leadingIcon = {
                     Text(
@@ -450,8 +501,8 @@ fun Profile(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
+                value = name.value,
+                onValueChange = { name.value = it },
                 label = { Text(stringResource(R.string.name)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -461,20 +512,20 @@ fun Profile(modifier: Modifier = Modifier) {
 
             Button(
                 onClick = {
-                    val newUserName = userName.replace("@", "").trim()
+                    val newUserName = userName.value.replace("@", "").trim()
 
                     val usersRef = database.getReference("users")
                     val newUserNameRef = usersRef.child(newUserName).get()
-                    val oldUserNameRef = usersRef.child(oldUserName)
+                    val oldUserNameRef = usersRef.child(oldUserName.value)
 
-                    if (userName != oldUserName) {
+                    if (userName.value != oldUserName.value) {
                         newUserNameRef.addOnSuccessListener { checkSnap ->
                             if (checkSnap.value == null) {
                                 reference.child("userName").setValue(newUserName)
                                 oldUserNameRef.removeValue()
                                 checkSnap.ref.setValue(currentUser!!.uid)
 
-                                oldUserName = userName
+                                oldUserName.value = userName.value
                                 userNameIsTaken = false
                             } else userNameIsTaken = true
                         }
@@ -488,13 +539,13 @@ fun Profile(modifier: Modifier = Modifier) {
                         }
                     }
 
-                    if (name != oldName) {
-                        reference.child("name").setValue(name)
-                        oldName = name
+                    if (name.value != oldName.value) {
+                        reference.child("name").setValue(name.value)
+                        oldName.value = name.value
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = userName != loadingStr && name != loadingStr && (userName != oldUserName || name != oldName)
+                enabled = userName.value != loadingStr && name.value != loadingStr && (userName.value != oldUserName.value || name.value != oldName.value)
             ) {
                 Text(stringResource(R.string.save_changes))
             }
