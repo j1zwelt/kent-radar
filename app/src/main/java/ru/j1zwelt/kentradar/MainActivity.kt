@@ -49,7 +49,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.compose.ui.unit.dp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -75,7 +74,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@PreviewScreenSizes
 @Composable
 fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
@@ -190,96 +188,148 @@ fun User(user: User) {
 
 @Composable
 fun Profile(modifier: Modifier = Modifier) {
+    val snackBarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     val loadingStr = stringResource(R.string.loading)
+    val errorMessage = stringResource(R.string.unknown_error)
 
     var userName by remember { mutableStateOf(loadingStr) }
+    var oldUserName by remember { mutableStateOf("") }
     var name by remember { mutableStateOf(loadingStr) }
+    var oldName by remember { mutableStateOf(loadingStr) }
+
+    var userNameIsTaken by remember { mutableStateOf(false) }
 
     val database = Firebase.database
     val reference = database.getReference(currentUser!!.uid)
 
     LaunchedEffect(key1 = Unit) {
         reference.child("userName").get().addOnSuccessListener {
-            if (it.exists()) userName = it.value.toString()
+            if (it.exists()) {
+                userName = it.value.toString()
+                oldUserName = userName
+            }
         }
 
         reference.child("name").get().addOnSuccessListener {
-            if (it.exists()) name = it.value.toString()
+            if (it.exists()) {
+                name = it.value.toString()
+                oldName = name
+            }
         }
     }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(48.dp))
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Top,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(48.dp))
+            Image(
+                painter = painterResource(id = R.drawable.ic_account_box),
+                contentDescription = stringResource(id = R.string.my_photo),
+                modifier = Modifier
+                    .size(160.dp)
+                    .clip(CircleShape)
+                    .border(
+                        border = BorderStroke(3.dp, MaterialTheme.colorScheme.primary),
+                        shape = CircleShape
+                    ),
+                contentScale = ContentScale.Crop
+            )
 
-        Image(
-            painter = painterResource(id = R.drawable.ic_account_box),
-            contentDescription = stringResource(id = R.string.my_photo),
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = userName,
+                onValueChange = { userName = it },
+                label = { Text(stringResource(R.string.username)) },
+                leadingIcon = {
+                    Text(
+                        text = "@",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                },
+                isError = userNameIsTaken,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.name)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    val newUserName = userName.replace("@", "")
+
+                    val usersRef = database.getReference("users")
+                    val newUserNameRef = usersRef.child(newUserName).get()
+                    val oldUserNameRef = usersRef.child(oldUserName)
+
+                    if (userName != oldUserName) {
+                        newUserNameRef.addOnSuccessListener { checkSnap ->
+                            if (checkSnap.value == null) {
+                                reference.child("userName").setValue(newUserName)
+                                oldUserNameRef.removeValue()
+                                checkSnap.ref.setValue(currentUser!!.uid)
+
+                                oldUserName = userName
+                                userNameIsTaken = false
+                            } else userNameIsTaken = true
+                        }
+
+                        newUserNameRef.addOnFailureListener {
+                            scope.launch {
+                                snackBarHostState.showSnackbar(
+                                    it.localizedMessage ?: errorMessage
+                                )
+                            }
+                        }
+                    }
+
+                    if (name != oldName) {
+                        reference.child("name").setValue(name)
+                        oldName = name
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = userName != loadingStr && name != loadingStr && (userName != oldUserName || name != oldName)
+            ) {
+                Text(stringResource(R.string.save_changes))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    Firebase.auth.signOut()
+                    currentUser = null
+                }, modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.sign_out))
+            }
+        }
+
+        SnackbarHost(
+            hostState = snackBarHostState,
             modifier = Modifier
-                .size(160.dp)
-                .clip(CircleShape)
-                .border(
-                    border = BorderStroke(3.dp, MaterialTheme.colorScheme.primary),
-                    shape = CircleShape
-                ),
-            contentScale = ContentScale.Crop
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
         )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = userName,
-            onValueChange = { userName = it },
-            label = { Text(stringResource(R.string.username)) },
-            leadingIcon = {
-                Text(
-                    text = "@",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text(stringResource(R.string.name)) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = {
-                reference.child("userName").setValue(userName)
-                reference.child("name").setValue(name)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = userName != loadingStr && name != loadingStr
-        ) {
-            Text(stringResource(R.string.save_changes))
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedButton(
-            onClick = {
-                Firebase.auth.signOut()
-                currentUser = null
-            }, modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.sign_out))
-        }
     }
 }
 
@@ -297,6 +347,8 @@ fun Register(modifier: Modifier = Modifier) {
     var name by remember { mutableStateOf("") }
     var password1 by remember { mutableStateOf("") }
     var password2 by remember { mutableStateOf("") }
+
+    var isTaken by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -326,8 +378,11 @@ fun Register(modifier: Modifier = Modifier) {
 
             OutlinedTextField(
                 value = userName,
-                onValueChange = { userName = it },
+                onValueChange = {
+                    userName = it
+                },
                 label = { Text(stringResource(R.string.username)) },
+                isError = isTaken,
                 leadingIcon = {
                     Text(
                         text = "@",
@@ -380,23 +435,43 @@ fun Register(modifier: Modifier = Modifier) {
             Button(
                 onClick = {
                     if (password1 == password2) {
-                        val editedUserName = userName.replace("@", "")
+                        val newUserName = userName.replace("@", "")
 
-                        val auth = Firebase.auth.createUserWithEmailAndPassword(email, password1)
-                        auth.addOnSuccessListener {
-                            currentUser = it.user
-                            val uid = currentUser!!.uid
+                        val database = Firebase.database
+                        val auth = Firebase.auth
 
-                            val database = Firebase.database
-                            val reference = database.getReference(uid)
-                            val uidRef = database.getReference("users/$editedUserName/uid")
+                        val checkUserName = database.getReference("users/$newUserName").get()
+                        checkUserName.addOnSuccessListener { checkSnap ->
+                            if (checkSnap.value == null) {
+                                val createUser =
+                                    auth.createUserWithEmailAndPassword(email, password1)
+                                createUser.addOnSuccessListener {
+                                    currentUser = it.user
+                                    val uid = currentUser!!.uid
+                                    val reference = database.getReference(uid)
+                                    val uidRef = database.getReference("users/$newUserName/uid")
+                                    reference.child("userName").setValue(newUserName)
+                                    reference.child("name").setValue(name)
+                                    uidRef.setValue(uid)
+                                }
 
-                            reference.child("userName").setValue(editedUserName)
-                            reference.child("name").setValue(name)
-                            uidRef.setValue(uid)
+                                createUser.addOnFailureListener {
+                                    scope.launch {
+                                        snackBarHostState.showSnackbar(
+                                            it.localizedMessage ?: errorMessage
+                                        )
+                                    }
+                                }
+                            } else {
+                                scope.launch {
+                                    snackBarHostState.showSnackbar(
+                                        errorMessage3
+                                    )
+                                }
+                            }
                         }
 
-                        auth.addOnFailureListener {
+                        checkUserName.addOnFailureListener {
                             scope.launch {
                                 snackBarHostState.showSnackbar(
                                     it.localizedMessage ?: errorMessage
@@ -487,15 +562,17 @@ fun SingIn(modifier: Modifier = Modifier) {
 
             Button(
                 onClick = {
-                    val auth = Firebase.auth.signInWithEmailAndPassword(email, password)
-                    auth.addOnSuccessListener {
+                    val auth = Firebase.auth
+                    val signIn = auth.signInWithEmailAndPassword(email, password)
+
+                    signIn.addOnSuccessListener {
                         currentUser = it.user
                     }
 
-                    auth.addOnFailureListener {
+                    signIn.addOnFailureListener {
                         scope.launch {
                             snackBarHostState.showSnackbar(
-                                message = it.localizedMessage ?: errorMessage
+                                it.localizedMessage ?: errorMessage
                             )
                         }
                     }
