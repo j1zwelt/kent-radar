@@ -1,9 +1,13 @@
 package ru.j1zwelt.kentradar
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -41,36 +45,51 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableDoubleState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.database
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import org.maplibre.compose.camera.CameraMoveReason
 import org.maplibre.compose.camera.CameraPosition
+import org.maplibre.compose.expressions.dsl.image
+import org.maplibre.compose.layers.SymbolLayer
 import org.maplibre.compose.map.MapState
 import org.maplibre.compose.map.MaplibreMap
 import org.maplibre.compose.map.rememberMapState
+import org.maplibre.compose.sources.GeoJsonData
+import org.maplibre.compose.sources.rememberGeoJsonSource
 import org.maplibre.compose.style.BaseStyle
+import org.maplibre.spatialk.geojson.Point
 import org.maplibre.spatialk.geojson.Position
 import ru.j1zwelt.kentradar.data.User
+import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
+import kotlin.math.abs
+import kotlin.time.Duration.Companion.seconds
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
 var currentAuthScreen by mutableStateOf("sign_in")
@@ -110,12 +129,35 @@ fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
 
     //Map
+    val locationHelper = LocationHelper(LocalContext.current)
+
+    val latitude = remember { mutableDoubleStateOf(0.0) }
+    val longitude = remember { mutableDoubleStateOf(0.0) }
+
+    val mapStyle = "https://tiles.openfreemap.org/styles/liberty"
     val mapState = rememberMapState(
-        baseStyle = BaseStyle.Uri("https://tiles.openfreemap.org/styles/liberty"),
-        initialCameraPosition = CameraPosition(
-            target = Position(latitude = 45.521, longitude = -122.675), zoom = 17.0
+        baseStyle = BaseStyle.Uri(mapStyle), initialCameraPosition = CameraPosition(
+            target = Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue),
+            zoom = 15.0
         )
-    )
+    ) {
+        if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) {
+            val myLivePoint = Point(
+                coordinates = Position(
+                    longitude = longitude.doubleValue, latitude = latitude.doubleValue
+                )
+            )
+            val locationSource = rememberGeoJsonSource(
+                data = GeoJsonData.Features(myLivePoint)
+            )
+
+            SymbolLayer(
+                id = "my-live-location-layer",
+                source = locationSource,
+                iconImage = image(painterResource(R.drawable.ic_user_location)),
+            )
+        }
+    }
 
     //Friends
     val friends = remember { mutableStateListOf<User>() }
@@ -144,7 +186,13 @@ fun KentRadarApp() {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
             when (currentDestination) {
                 AppDestinations.MAP -> {
-                    Map(modifier = Modifier.padding(innerPadding), mapState)
+                    Map(
+                        modifier = Modifier.padding(innerPadding),
+                        locationHelper,
+                        mapState,
+                        latitude,
+                        longitude
+                    )
                 }
 
                 AppDestinations.FRIENDS -> {
@@ -185,20 +233,75 @@ fun AuthScreen() {
 }
 
 @Composable
-fun Map(modifier: Modifier = Modifier, mapState: MapState) {
-    // TODO: делаем карту
+fun Map(
+    modifier: Modifier = Modifier,
+    locationHelper: LocationHelper,
+    mapState: MapState,
+    latitude: MutableDoubleState,
+    longitude: MutableDoubleState
+) {
+    var isMapCentered by remember { mutableStateOf(true) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        if (granted) {
+            if (ActivityCompat.checkSelfPermission(
+                    locationHelper.context, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED || ActivityCompat.checkSelfPermission(
+                    locationHelper.context, Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                locationHelper.addLocationUpdateListener {
+                    latitude.doubleValue = it.latitude
+                    longitude.doubleValue = it.longitude
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        )
+    }
+
+    LaunchedEffect(isMapCentered, latitude.doubleValue, longitude.doubleValue) {
+        if (isMapCentered) {
+            val position =
+                Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue)
+            mapState.animateCameraPosition(
+                position = mapState.cameraPosition.copy(target = position),
+                duration = 2.seconds
+            )
+        }
+    }
+
+    LaunchedEffect(mapState) {
+        snapshotFlow { mapState.cameraMoveReason }
+            .collectLatest { reason ->
+                if (reason == CameraMoveReason.GESTURE) {
+                    isMapCentered = false
+                }
+            }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         MaplibreMap(state = mapState)
 
         FloatingActionButton(
             onClick = {
-
+                isMapCentered = true
             }, modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.ic_my_location),
+                painter = if (isMapCentered) painterResource(id = R.drawable.ic_my_location)
+                else painterResource(id = R.drawable.ic_my_location_search),
                 contentDescription = "Мое местоположение"
             )
         }
@@ -448,12 +551,9 @@ fun Profile(
             if (it.exists()) {
                 if (userName.value == loadingStr) userName.value =
                     it.child("userName").value.toString()
-                if (oldUserName.value == "") oldUserName.value =
-                    userName.value
-                if (name.value == loadingStr) name.value =
-                    it.child("name").value.toString()
-                if (oldName.value == "") oldName.value =
-                    name.value
+                if (oldUserName.value == "") oldUserName.value = userName.value
+                if (name.value == loadingStr) name.value = it.child("name").value.toString()
+                if (oldName.value == "") oldName.value = name.value
             }
         }
     }
