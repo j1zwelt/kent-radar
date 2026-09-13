@@ -143,9 +143,12 @@ fun KentRadarApp() {
     val mapState = rememberMapState(
         baseStyle = BaseStyle.Uri(mapStyle), initialCameraPosition = CameraPosition(
             target = Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue),
-            zoom = 15.0
+            zoom = 13.0
         )
     ) {
+        val database = Firebase.database
+        val reference = database.getReference(currentUser!!.uid)
+
         if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) {
             val myLivePoint = Point(
                 coordinates = Position(
@@ -161,6 +164,9 @@ fun KentRadarApp() {
                 source = locationSource,
                 iconImage = image(painterResource(R.drawable.ic_user_location)),
             )
+
+            reference.child("latitude").setValue(latitude.doubleValue)
+            reference.child("longitude").setValue(longitude.doubleValue)
         }
     }
 
