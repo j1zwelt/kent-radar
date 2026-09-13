@@ -27,4 +27,7 @@
     <string name="enter_a_friend_s_username">Enter a friend\'s username</string>
     <string name="send">Send</string>
     <string name="cancel">Cancel</string>
+    <string name="remove">Remove</string>
+    <string name="remove_from_friends">Remove from friends</string>
+    <string name="do_you_really_want_to_remove_from_friends">Do you really want to remove %s from friends?</string>
 </resources>

@@ -11,7 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -197,47 +197,60 @@ fun KentRadarApp() {
     //Friends
     val myFriendsPath = "${currentUser!!.uid}/friends"
     val database = Firebase.database
-    val friendsRef = database.getReference(myFriendsPath)
+    val myFriendsRef = database.getReference(myFriendsPath)
 
-    LaunchedEffect(key1 = Unit) {
-        friendsRef.get().addOnSuccessListener { friendsRes ->
-            if (friendsRes.exists()) for (child in friendsRes.children) {
-                val userUid = child.key
-                val isFriend = child.value
-                val userRef = database.getReference("$userUid")
+    LaunchedEffect(Unit) {
+        myFriendsRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(p0: DataSnapshot) {
+                if (p0.exists()) for (child in p0.children) {
+                    val userUid = child.key
+                    val isFriend = child.value
+                    val userRef = database.getReference("$userUid")
 
-                userRef.addValueEventListener(object : ValueEventListener {
-                    override fun onDataChange(p0: DataSnapshot) {
-                        val userName = p0.child("userName").value.toString()
-                        val name = p0.child("name").value.toString()
-                        val status = p0.child("status").value.toString().toInt()
-                        val latitude = p0.child("latitude").value.toString().toDouble()
-                        val longitude = p0.child("longitude").value.toString().toDouble()
+                    userRef.addValueEventListener(object : ValueEventListener {
+                        override fun onDataChange(p1: DataSnapshot) {
+                            val checkFriendRef = myFriendsRef.child(userUid!!)
+                            checkFriendRef.get().addOnSuccessListener { friendshipSnapshot ->
+                                if (!friendshipSnapshot.exists()) {
+                                    return@addOnSuccessListener
+                                }
 
-                        val user = User(
-                            userUid!!,
-                            userName,
-                            name,
-                            status,
-                            latitude,
-                            longitude,
-                            isFriend.toString().toBoolean()
-                        )
+                                val userName = p1.child("userName").value.toString()
+                                val name = p1.child("name").value.toString()
+                                val status = p1.child("status").value.toString().toInt()
+                                val latitude = p1.child("latitude").value.toString().toDouble()
+                                val longitude = p1.child("longitude").value.toString().toDouble()
 
-                        val existingIndex = friends.indexOfFirst { it.uid == user.uid }
-                        if (existingIndex != -1) {
-                            friends[existingIndex] = user
-                        } else {
-                            friends.add(user)
+                                val user = User(
+                                    userUid,
+                                    userName,
+                                    name,
+                                    status,
+                                    latitude,
+                                    longitude,
+                                    isFriend.toString().toBoolean()
+                                )
+
+                                val existingIndex = friends.indexOfFirst { it.uid == user.uid }
+                                if (existingIndex != -1) {
+                                    friends[existingIndex] = user
+                                } else {
+                                    friends.add(user)
+                                }
+                            }
                         }
-                    }
 
-                    override fun onCancelled(p0: DatabaseError) {
-                        TODO("Not yet implemented")
-                    }
-                })
+                        override fun onCancelled(p0: DatabaseError) {
+                            TODO("Not yet implemented")
+                        }
+                    })
+                }
             }
-        }
+
+            override fun onCancelled(p0: DatabaseError) {
+                TODO("Not yet implemented")
+            }
+        })
     }
 
     //Profile
@@ -360,20 +373,21 @@ fun Map(
                 latitude = latitude.doubleValue, longitude = longitude.doubleValue
             )
             mapState.animateCameraPosition(
-                position = mapState.cameraPosition.copy(target = position, zoom = 13.0), duration = 2.seconds
+                position = mapState.cameraPosition.copy(target = position, zoom = 13.0),
+                duration = 2.seconds
             )
         }
     }
 
     LaunchedEffect(friend.value) {
-
         val currentFriend = friend.value
         if (currentFriend != null) {
             val position = Position(
                 latitude = currentFriend.latitude, longitude = currentFriend.longitude
             )
             mapState.animateCameraPosition(
-                position = mapState.cameraPosition.copy(target = position, zoom = 13.0), duration = 2.seconds
+                position = mapState.cameraPosition.copy(target = position, zoom = 13.0),
+                duration = 2.seconds
             )
 
             isMapCentered = false
@@ -419,7 +433,8 @@ fun Friends(
         val errorMessage = stringResource(R.string.failed_to_accept_the_friend_request)
         val errorMessage2 = stringResource(R.string.failed_to_reject_the_friend_request)
 
-        var showDialog by remember { mutableStateOf(false) }
+        var showSendDialog by remember { mutableStateOf(false) }
+        var removableFriend by remember { mutableStateOf<User?>(null) }
         val snackBarHostState = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
 
@@ -430,6 +445,8 @@ fun Friends(
                 User(user, onClick = {
                     friend.value = user
                     onNavigateToMap()
+                }, onLongClick = {
+                    removableFriend = user
                 }, onAcceptClick = {
                     val database = Firebase.database
                     val myRef = database.getReference("${currentUser!!.uid}/friends/${user.uid}")
@@ -467,7 +484,7 @@ fun Friends(
 
         FloatingActionButton(
             onClick = {
-                showDialog = true
+                showSendDialog = true
             }, modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
@@ -478,10 +495,10 @@ fun Friends(
             )
         }
 
-        if (showDialog) {
+        if (showSendDialog) {
             var isNullUser by remember { mutableStateOf(false) }
 
-            AlertDialog(onDismissRequest = { showDialog = false }, title = {
+            AlertDialog(onDismissRequest = { showSendDialog = false }, title = {
                 Text(text = stringResource(R.string.sending_friend_requests))
             }, text = {
                 Column(
@@ -515,7 +532,7 @@ fun Friends(
                                         database.getReference("$friendUid/friends/${currentUser!!.uid}")
                                     friendRef.setValue(false)
 
-                                    showDialog = false
+                                    showSendDialog = false
                                 } else isNullUser = true
                             }
                         } else isNullUser = true
@@ -524,7 +541,47 @@ fun Friends(
                 }
             }, dismissButton = {
                 TextButton(onClick = {
-                    showDialog = false
+                    showSendDialog = false
+                }) { Text(stringResource(R.string.cancel)) }
+            })
+        }
+
+        if (removableFriend != null) {
+            AlertDialog(onDismissRequest = { removableFriend = null }, title = {
+                Text(text = stringResource(R.string.remove_from_friends))
+            }, text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.do_you_really_want_to_remove_from_friends,
+                            removableFriend!!.name
+                        )
+                    )
+                }
+            }, confirmButton = {
+                TextButton(
+                    onClick = {
+                        val database = Firebase.database
+                        val myRef =
+                            database.getReference("${currentUser!!.uid}/friends/${removableFriend!!.uid}")
+                        val userRef =
+                            database.getReference("${removableFriend!!.uid}/friends/${currentUser!!.uid}")
+                        myRef.removeValue()
+                        userRef.removeValue()
+
+                        // TODO: удаление из списка
+                        friends.removeIf { it.uid == removableFriend!!.uid }
+
+                        removableFriend = null
+                    }) {
+                    Text(stringResource(R.string.remove))
+                }
+            }, dismissButton = {
+                TextButton(onClick = {
+                    removableFriend = null
                 }) { Text(stringResource(R.string.cancel)) }
             })
         }
@@ -542,15 +599,16 @@ fun Friends(
 fun User(
     user: User,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onAcceptClick: () -> Unit,
     onDismissClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+            .combinedClickable(onClick = { onClick() }, onLongClick = { onLongClick() })
+            .padding(16.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
         Image(
             painter = painterResource(id = R.drawable.ic_account_box),
             contentDescription = stringResource(id = R.string.my_photo),
