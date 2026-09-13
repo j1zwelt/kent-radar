@@ -71,6 +71,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.database
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -128,6 +131,8 @@ class MainActivity : ComponentActivity() {
 fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
 
+    val friends = remember { mutableStateListOf<User>() }
+
     //Map
     val locationHelper = LocationHelper(LocalContext.current)
 
@@ -139,7 +144,6 @@ fun KentRadarApp() {
     } else {
         "https://tiles.openfreemap.org/styles/liberty"
     }
-
     val mapState = rememberMapState(
         baseStyle = BaseStyle.Uri(mapStyle), initialCameraPosition = CameraPosition(
             target = Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue),
@@ -149,51 +153,88 @@ fun KentRadarApp() {
         val database = Firebase.database
         val reference = database.getReference(currentUser!!.uid)
 
+        //My marker
         if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) {
-            val myLivePoint = Point(
+            val myPoint = Point(
                 coordinates = Position(
                     longitude = longitude.doubleValue, latitude = latitude.doubleValue
                 )
             )
-            val locationSource = rememberGeoJsonSource(
-                data = GeoJsonData.Features(myLivePoint)
+            val myGeoSource = rememberGeoJsonSource(
+                data = GeoJsonData.Features(myPoint)
             )
 
             SymbolLayer(
                 id = "my-live-location-layer",
-                source = locationSource,
+                source = myGeoSource,
                 iconImage = image(painterResource(R.drawable.ic_user_location)),
             )
 
             reference.child("latitude").setValue(latitude.doubleValue)
             reference.child("longitude").setValue(longitude.doubleValue)
         }
+
+        //Friends markers
+        val activeFriends =
+            friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
+        activeFriends.forEach { friend ->
+            val friendPoint =
+                Point(Position(longitude = friend.longitude, latitude = friend.latitude))
+
+            val friendSource = rememberGeoJsonSource(
+                data = GeoJsonData.Features(friendPoint)
+            )
+
+            SymbolLayer(
+                id = "layer-${friend.uid}",
+                source = friendSource,
+                iconImage = image(painterResource(R.drawable.ic_friends)),
+            )
+        }
     }
 
     //Friends
-    val friends = remember { mutableStateListOf<User>() }
-
     val myFriendsPath = "${currentUser!!.uid}/friends"
     val database = Firebase.database
     val friendsRef = database.getReference(myFriendsPath)
 
     LaunchedEffect(key1 = Unit) {
-        friendsRef.get().addOnSuccessListener {
-            if (it.exists()) for (child in it.children) {
+        friendsRef.get().addOnSuccessListener { friendsRes ->
+            if (friendsRes.exists()) for (child in friendsRes.children) {
                 val userUid = child.key
                 val isFriend = child.value
-                val userRef = database.getReference("$userUid").get()
+                val userRef = database.getReference("$userUid")
 
-                userRef.addOnSuccessListener { userSnap ->
-                    val userName = userSnap.child("userName").value.toString()
-                    val name = userSnap.child("name").value.toString()
-                    val status = userSnap.child("status").value.toString().toInt()
+                userRef.addValueEventListener(object : ValueEventListener {
+                    override fun onDataChange(p0: DataSnapshot) {
+                        val userName = p0.child("userName").value.toString()
+                        val name = p0.child("name").value.toString()
+                        val status = p0.child("status").value.toString().toInt()
+                        val latitude = p0.child("latitude").value.toString().toDouble()
+                        val longitude = p0.child("longitude").value.toString().toDouble()
 
-                    val user = User(
-                        userUid!!, userName, name, status, isFriend.toString().toBoolean()
-                    )
-                    friends.add(user)
-                }
+                        val user = User(
+                            userUid!!,
+                            userName,
+                            name,
+                            status,
+                            latitude,
+                            longitude,
+                            isFriend.toString().toBoolean()
+                        )
+
+                        val existingIndex = friends.indexOfFirst { it.uid == user.uid }
+                        if (existingIndex != -1) {
+                            friends[existingIndex] = user
+                        } else {
+                            friends.add(user)
+                        }
+                    }
+
+                    override fun onCancelled(p0: DatabaseError) {
+                        TODO("Not yet implemented")
+                    }
+                })
             }
         }
     }
@@ -205,6 +246,7 @@ fun KentRadarApp() {
     val name = remember { mutableStateOf(loadingStr) }
     val oldName = remember { mutableStateOf("") }
 
+    //Main UI
     NavigationSuiteScaffold(
         navigationSuiteItems = {
             AppDestinations.entries.forEach {
@@ -310,19 +352,17 @@ fun Map(
             val position =
                 Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue)
             mapState.animateCameraPosition(
-                position = mapState.cameraPosition.copy(target = position),
-                duration = 2.seconds
+                position = mapState.cameraPosition.copy(target = position), duration = 2.seconds
             )
         }
     }
 
     LaunchedEffect(mapState) {
-        snapshotFlow { mapState.cameraMoveReason }
-            .collectLatest { reason ->
-                if (reason == CameraMoveReason.GESTURE) {
-                    isMapCentered = false
-                }
+        snapshotFlow { mapState.cameraMoveReason }.collectLatest { reason ->
+            if (reason == CameraMoveReason.GESTURE) {
+                isMapCentered = false
             }
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
