@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -88,7 +89,6 @@ import org.maplibre.spatialk.geojson.Position
 import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
-import kotlin.math.abs
 import kotlin.time.Duration.Companion.seconds
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
@@ -134,7 +134,12 @@ fun KentRadarApp() {
     val latitude = remember { mutableDoubleStateOf(0.0) }
     val longitude = remember { mutableDoubleStateOf(0.0) }
 
-    val mapStyle = "https://tiles.openfreemap.org/styles/liberty"
+    val mapStyle = if (isSystemInDarkTheme()) {
+        "https://tiles.openfreemap.org/styles/fiord"
+    } else {
+        "https://tiles.openfreemap.org/styles/liberty"
+    }
+
     val mapState = rememberMapState(
         baseStyle = BaseStyle.Uri(mapStyle), initialCameraPosition = CameraPosition(
             target = Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue),
