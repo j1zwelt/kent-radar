@@ -173,6 +173,31 @@ fun KentRadarApp() {
     //Friends
     val friends = remember { mutableStateListOf<User>() }
 
+    val myFriendsPath = "${currentUser!!.uid}/friends"
+    val database = Firebase.database
+    val friendsRef = database.getReference(myFriendsPath)
+
+    LaunchedEffect(key1 = Unit) {
+        friendsRef.get().addOnSuccessListener {
+            if (it.exists()) for (child in it.children) {
+                val userUid = child.key
+                val isFriend = child.value
+                val userRef = database.getReference("$userUid").get()
+
+                userRef.addOnSuccessListener { userSnap ->
+                    val userName = userSnap.child("userName").value.toString()
+                    val name = userSnap.child("name").value.toString()
+                    val status = userSnap.child("status").value.toString().toInt()
+
+                    val user = User(
+                        userUid!!, userName, name, status, isFriend.toString().toBoolean()
+                    )
+                    friends.add(user)
+                }
+            }
+        }
+    }
+
     //Profile
     val loadingStr = stringResource(R.string.loading)
     val userName = remember { mutableStateOf(loadingStr) }
@@ -331,32 +356,6 @@ fun Friends(modifier: Modifier = Modifier, friends: SnapshotStateList<User>) {
 
         var userName by remember { mutableStateOf("") }
 
-        val myFriends = "${currentUser!!.uid}/friends"
-
-        val database = Firebase.database
-        val friendsRef = database.getReference(myFriends)
-
-        if (friends.isEmpty()) LaunchedEffect(key1 = Unit) {
-            friendsRef.get().addOnSuccessListener {
-                if (it.exists()) for (child in it.children) {
-                    val userUid = child.key
-                    val isFriend = child.value
-                    val userRef = database.getReference("$userUid").get()
-
-                    userRef.addOnSuccessListener { userSnap ->
-                        val userName = userSnap.child("userName").value.toString()
-                        val name = userSnap.child("name").value.toString()
-                        val status = userSnap.child("status").value.toString().toInt()
-
-                        val user = User(
-                            userUid!!, userName, name, status, isFriend.toString().toBoolean()
-                        )
-                        friends.add(user)
-                    }
-                }
-            }
-        }
-
         LazyColumn {
             items(friends) { user ->
                 User(user, onClick = {
@@ -435,19 +434,21 @@ fun Friends(modifier: Modifier = Modifier, friends: SnapshotStateList<User>) {
                     onClick = {
                         val editUserName = userName.replace("@", "").trim()
 
-                        val database = Firebase.database
-                        val searchRef = database.getReference("users/${editUserName}").get()
+                        if (!(friends.any { it.userName == editUserName })) {
+                            val database = Firebase.database
+                            val searchRef = database.getReference("users/${editUserName}").get()
 
-                        searchRef.addOnSuccessListener {
-                            if (it.exists()) {
-                                val friendUid = it.value.toString()
-                                val friendRef =
-                                    database.getReference("$friendUid/friends/${currentUser!!.uid}")
-                                friendRef.setValue(false)
+                            searchRef.addOnSuccessListener {
+                                if (it.exists()) {
+                                    val friendUid = it.value.toString()
+                                    val friendRef =
+                                        database.getReference("$friendUid/friends/${currentUser!!.uid}")
+                                    friendRef.setValue(false)
 
-                                showDialog = false
-                            } else isNullUser = true
-                        }
+                                    showDialog = false
+                                } else isNullUser = true
+                            }
+                        } else isNullUser = true
                     }) {
                     Text(stringResource(R.string.send))
                 }
