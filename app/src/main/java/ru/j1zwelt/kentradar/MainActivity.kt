@@ -132,6 +132,7 @@ fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
 
     val friends = remember { mutableStateListOf<User>() }
+    val friend = remember { mutableStateOf<User?>(null) }
 
     //Map
     val locationHelper = LocationHelper(LocalContext.current)
@@ -269,12 +270,17 @@ fun KentRadarApp() {
                         locationHelper,
                         mapState,
                         latitude,
-                        longitude
+                        longitude,
+                        friend
                     )
                 }
 
                 AppDestinations.FRIENDS -> {
-                    Friends(modifier = Modifier.padding(innerPadding), friends)
+                    Friends(
+                        modifier = Modifier.padding(innerPadding),
+                        friends,
+                        friend
+                    ) { currentDestination = AppDestinations.MAP }
                 }
 
                 AppDestinations.PROFILE -> {
@@ -316,7 +322,8 @@ fun Map(
     locationHelper: LocationHelper,
     mapState: MapState,
     latitude: MutableDoubleState,
-    longitude: MutableDoubleState
+    longitude: MutableDoubleState,
+    friend: MutableState<User?>
 ) {
     var isMapCentered by remember { mutableStateOf(true) }
 
@@ -349,11 +356,28 @@ fun Map(
 
     LaunchedEffect(isMapCentered, latitude.doubleValue, longitude.doubleValue) {
         if (isMapCentered) {
-            val position =
-                Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue)
-            mapState.animateCameraPosition(
-                position = mapState.cameraPosition.copy(target = position), duration = 2.seconds
+            val position = Position(
+                latitude = latitude.doubleValue, longitude = longitude.doubleValue
             )
+            mapState.animateCameraPosition(
+                position = mapState.cameraPosition.copy(target = position, zoom = 13.0), duration = 2.seconds
+            )
+        }
+    }
+
+    LaunchedEffect(friend.value) {
+
+        val currentFriend = friend.value
+        if (currentFriend != null) {
+            val position = Position(
+                latitude = currentFriend.latitude, longitude = currentFriend.longitude
+            )
+            mapState.animateCameraPosition(
+                position = mapState.cameraPosition.copy(target = position, zoom = 13.0), duration = 2.seconds
+            )
+
+            isMapCentered = false
+            friend.value = null
         }
     }
 
@@ -385,7 +409,12 @@ fun Map(
 }
 
 @Composable
-fun Friends(modifier: Modifier = Modifier, friends: SnapshotStateList<User>) {
+fun Friends(
+    modifier: Modifier = Modifier,
+    friends: SnapshotStateList<User>,
+    friend: MutableState<User?>,
+    onNavigateToMap: () -> Unit
+) {
     Box(modifier = modifier.fillMaxSize()) {
         val errorMessage = stringResource(R.string.failed_to_accept_the_friend_request)
         val errorMessage2 = stringResource(R.string.failed_to_reject_the_friend_request)
@@ -399,7 +428,8 @@ fun Friends(modifier: Modifier = Modifier, friends: SnapshotStateList<User>) {
         LazyColumn {
             items(friends) { user ->
                 User(user, onClick = {
-                    // TODO: показываем где наш кент на карте
+                    friend.value = user
+                    onNavigateToMap()
                 }, onAcceptClick = {
                     val database = Firebase.database
                     val myRef = database.getReference("${currentUser!!.uid}/friends/${user.uid}")
