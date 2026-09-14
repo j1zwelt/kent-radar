@@ -1,13 +1,15 @@
 package ru.j1zwelt.kentradar
 
-import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -45,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableDoubleState
 import androidx.compose.runtime.MutableState
@@ -68,7 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.DataSnapshot
@@ -338,33 +341,46 @@ fun Map(
     longitude: MutableDoubleState,
     friend: MutableState<User?>
 ) {
-    var isMapCentered by remember { mutableStateOf(true) }
+    val currentContext = locationHelper.context
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        if (granted) {
-            if (ActivityCompat.checkSelfPermission(
-                    locationHelper.context, Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED || ActivityCompat.checkSelfPermission(
-                    locationHelper.context, Manifest.permission.ACCESS_COARSE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                locationHelper.addLocationUpdateListener {
-                    latitude.doubleValue = it.latitude
-                    longitude.doubleValue = it.longitude
+    var isMapCentered by remember { mutableStateOf(false) }
+
+    val locationManager = remember { currentContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
+    var isGpsActive by remember {
+        mutableStateOf(
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        )
+    }
+
+    DisposableEffect(key1 = Unit) {
+        val filter = IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
+        val gpsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == LocationManager.PROVIDERS_CHANGED_ACTION) {
+                    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                    isGpsActive = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
                 }
             }
         }
+        ContextCompat.registerReceiver(currentContext, gpsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { currentContext.unregisterReceiver(gpsReceiver) }
     }
 
-    LaunchedEffect(Unit) {
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
-            )
-        )
+    LaunchedEffect(isGpsActive) {
+        if (isGpsActive) {
+            val hasFinePermission = ContextCompat.checkSelfPermission(
+                currentContext, android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (hasFinePermission) {
+                locationHelper.addLocationUpdateListener { location ->
+                    latitude.doubleValue = location.latitude
+                    longitude.doubleValue = location.longitude
+                }
+            }
+        }
     }
 
     LaunchedEffect(isMapCentered, latitude.doubleValue, longitude.doubleValue) {
@@ -408,7 +424,8 @@ fun Map(
 
         FloatingActionButton(
             onClick = {
-                isMapCentered = true
+                if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0)
+                    isMapCentered = true
             }, modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
@@ -572,7 +589,6 @@ fun Friends(
                         myRef.removeValue()
                         userRef.removeValue()
 
-                        // TODO: удаление из списка
                         friends.removeIf { it.uid == removableFriend!!.uid }
 
                         removableFriend = null
