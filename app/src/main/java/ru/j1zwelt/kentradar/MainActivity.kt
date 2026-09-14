@@ -1,15 +1,20 @@
 package ru.j1zwelt.kentradar
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Context.MODE_PRIVATE
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -43,6 +48,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -72,6 +79,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.DataSnapshot
@@ -94,6 +102,7 @@ import org.maplibre.spatialk.geojson.Point
 import org.maplibre.spatialk.geojson.Position
 import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.location.LocationHelper
+import ru.j1zwelt.kentradar.location.SharingService
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 import kotlin.time.Duration.Companion.seconds
 
@@ -104,9 +113,27 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        currentUser = Firebase.auth.currentUser
+
         setContent {
             KentRadarTheme {
-                currentUser = Firebase.auth.currentUser
+                val launcher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { }
+
+                LaunchedEffect(currentUser) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val hasPermission = ContextCompat.checkSelfPermission(
+                            this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (!hasPermission) {
+                            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
+
                 if (currentUser != null) KentRadarApp()
                 else AuthScreen()
             }
@@ -134,11 +161,32 @@ class MainActivity : ComponentActivity() {
 fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
 
+    //General
+    val context = LocalContext.current
+
+    val sPrefs = context.getSharedPreferences("sPrefs", MODE_PRIVATE)
+
     val friends = remember { mutableStateListOf<User>() }
     val friend = remember { mutableStateOf<User?>(null) }
+    val sharingLocation = remember { mutableStateOf(sPrefs.getBoolean("sharingLocation", true)) }
+
+    //Service
+    if (currentUser != null) {
+        LaunchedEffect(sharingLocation.value) {
+            val intent = Intent(context, SharingService::class.java).apply {
+                action =
+                    if (sharingLocation.value) SharingService.ACTION_START else SharingService.ACTION_STOP
+            }
+
+            if (sharingLocation.value) context.startForegroundService(intent)
+            else context.startService(intent)
+
+            sPrefs.edit { putBoolean("sharingLocation", sharingLocation.value) }
+        }
+    }
 
     //Map
-    val locationHelper = LocationHelper(LocalContext.current)
+    val locationHelper = LocationHelper(context)
 
     val locationManager =
         remember { locationHelper.context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
@@ -164,9 +212,6 @@ fun KentRadarApp() {
             zoom = 13.0
         )
     ) {
-        val database = Firebase.database
-        val reference = database.getReference(currentUser!!.uid)
-
         //My marker
         if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) {
             val myPoint = Point(
@@ -186,9 +231,6 @@ fun KentRadarApp() {
             SymbolLayer(
                 id = "my-live-location-layer", source = myGeoSource, iconImage = image(icon)
             )
-
-            reference.child("latitude").setValue(latitude.doubleValue)
-            reference.child("longitude").setValue(longitude.doubleValue)
         }
 
         //Friends markers
@@ -205,7 +247,7 @@ fun KentRadarApp() {
             SymbolLayer(
                 id = "layer-${friend.uid}",
                 source = friendSource,
-                iconImage = image(painterResource(R.drawable.ic_friends)),
+                iconImage = image(painterResource(id = R.drawable.ic_friends))
             )
         }
     }
@@ -299,6 +341,7 @@ fun KentRadarApp() {
                         locationHelper,
                         mapState,
                         isGpsActive,
+                        sharingLocation,
                         latitude,
                         longitude,
                         friend
@@ -350,6 +393,7 @@ fun Map(
     locationHelper: LocationHelper,
     mapState: MapState,
     isGpsActive: MutableState<Boolean>,
+    sharingLocation: MutableState<Boolean>,
     latitude: MutableDoubleState,
     longitude: MutableDoubleState,
     friend: MutableState<User?>
@@ -371,16 +415,18 @@ fun Map(
                 }
             }
         }
+
         ContextCompat.registerReceiver(
             currentContext, gpsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
         )
+
         onDispose { currentContext.unregisterReceiver(gpsReceiver) }
     }
 
     LaunchedEffect(isGpsActive.value) {
         if (isGpsActive.value) {
             val hasFinePermission = ContextCompat.checkSelfPermission(
-                currentContext, android.Manifest.permission.ACCESS_FINE_LOCATION
+                currentContext, Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
 
             if (hasFinePermission) {
@@ -430,6 +476,22 @@ fun Map(
 
     Box(modifier = modifier.fillMaxSize()) {
         MaplibreMap(state = mapState)
+
+        Switch(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp),
+            thumbContent = if (sharingLocation.value) {
+                {
+                    Icon(
+                        painterResource(R.drawable.ic_sharing_location),
+                        contentDescription = null,
+                        modifier = Modifier.size(SwitchDefaults.IconSize),
+                    )
+                }
+            } else null,
+            checked = sharingLocation.value,
+            onCheckedChange = { sharingLocation.value = it })
 
         FloatingActionButton(
             onClick = {
@@ -656,8 +718,7 @@ fun User(
             Text(
                 text = when (user.status) {
                     0 -> stringResource(R.string.offline)
-                    1 -> stringResource(R.string.sharing_location)
-                    2 -> stringResource(R.string.online)
+                    1 -> stringResource(R.string.online)
                     else -> stringResource(R.string.offline)
                 }, style = MaterialTheme.typography.titleSmall
             )

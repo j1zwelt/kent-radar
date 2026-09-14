@@ -22,7 +22,6 @@
     <string name="failed_to_reject_the_friend_request">Failed to reject the friend request</string>
     <string name="offline">Offline</string>
     <string name="online">Online</string>
-    <string name="sharing_location">Sharing location</string>
     <string name="sending_friend_requests">Sending friend requests</string>
     <string name="enter_a_friend_s_username">Enter a friend\'s username</string>
     <string name="send">Send</string>
@@ -30,4 +29,6 @@
     <string name="remove">Remove</string>
     <string name="remove_from_friends">Remove from friends</string>
     <string name="do_you_really_want_to_remove_from_friends">Do you really want to remove %s from friends?</string>
+    <string name="you_are_sharing_your_location">You are sharing your location</string>
+    <string name="the_app_broadcasts_your_location_to_your_friends">The app broadcasts your location to your friends</string>
 </resources>
