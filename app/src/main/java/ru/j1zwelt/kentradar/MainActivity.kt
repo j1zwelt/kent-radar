@@ -140,6 +140,16 @@ fun KentRadarApp() {
     //Map
     val locationHelper = LocationHelper(LocalContext.current)
 
+    val locationManager =
+        remember { locationHelper.context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
+    val isGpsActive = remember {
+        mutableStateOf(
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(
+                LocationManager.NETWORK_PROVIDER
+            )
+        )
+    }
+
     val latitude = remember { mutableDoubleStateOf(0.0) }
     val longitude = remember { mutableDoubleStateOf(0.0) }
 
@@ -168,10 +178,13 @@ fun KentRadarApp() {
                 data = GeoJsonData.Features(myPoint)
             )
 
+            val icon = painterResource(
+                if (isGpsActive.value) R.drawable.ic_my_map_location
+                else R.drawable.ic_my_map_location_search
+            )
+
             SymbolLayer(
-                id = "my-live-location-layer",
-                source = myGeoSource,
-                iconImage = image(painterResource(R.drawable.ic_user_location)),
+                id = "my-live-location-layer", source = myGeoSource, iconImage = image(icon)
             )
 
             reference.child("latitude").setValue(latitude.doubleValue)
@@ -285,6 +298,7 @@ fun KentRadarApp() {
                         modifier = Modifier.padding(innerPadding),
                         locationHelper,
                         mapState,
+                        isGpsActive,
                         latitude,
                         longitude,
                         friend
@@ -293,9 +307,7 @@ fun KentRadarApp() {
 
                 AppDestinations.FRIENDS -> {
                     Friends(
-                        modifier = Modifier.padding(innerPadding),
-                        friends,
-                        friend
+                        modifier = Modifier.padding(innerPadding), friends, friend
                     ) { currentDestination = AppDestinations.MAP }
                 }
 
@@ -337,6 +349,7 @@ fun Map(
     modifier: Modifier = Modifier,
     locationHelper: LocationHelper,
     mapState: MapState,
+    isGpsActive: MutableState<Boolean>,
     latitude: MutableDoubleState,
     longitude: MutableDoubleState,
     friend: MutableState<User?>
@@ -345,31 +358,27 @@ fun Map(
 
     var isMapCentered by remember { mutableStateOf(false) }
 
-    val locationManager = remember { currentContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
-    var isGpsActive by remember {
-        mutableStateOf(
-            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        )
-    }
-
     DisposableEffect(key1 = Unit) {
         val filter = IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
         val gpsReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action == LocationManager.PROVIDERS_CHANGED_ACTION) {
                     val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-                    isGpsActive = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                    isGpsActive.value =
+                        lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(
+                            LocationManager.NETWORK_PROVIDER
+                        )
                 }
             }
         }
-        ContextCompat.registerReceiver(currentContext, gpsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(
+            currentContext, gpsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         onDispose { currentContext.unregisterReceiver(gpsReceiver) }
     }
 
-    LaunchedEffect(isGpsActive) {
-        if (isGpsActive) {
+    LaunchedEffect(isGpsActive.value) {
+        if (isGpsActive.value) {
             val hasFinePermission = ContextCompat.checkSelfPermission(
                 currentContext, android.Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
@@ -424,8 +433,8 @@ fun Map(
 
         FloatingActionButton(
             onClick = {
-                if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0)
-                    isMapCentered = true
+                if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) isMapCentered =
+                    true
             }, modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
