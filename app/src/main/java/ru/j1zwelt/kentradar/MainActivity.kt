@@ -118,20 +118,25 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KentRadarTheme {
-                val launcher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.RequestPermission()
-                ) { }
+                val launcher =
+                    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
-                LaunchedEffect(currentUser) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        val hasPermission = ContextCompat.checkSelfPermission(
-                            this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
-                        ) == PackageManager.PERMISSION_GRANTED
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val hasNotificationPermission = ContextCompat.checkSelfPermission(
+                        this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
 
-                        if (!hasPermission) {
-                            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        }
+                    if (!hasNotificationPermission) {
+                        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
+                }
+
+                val hasLocationPermission = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (!hasLocationPermission) {
+                    launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                 }
 
                 if (currentUser != null) KentRadarApp()
@@ -163,6 +168,7 @@ fun KentRadarApp() {
 
     //General
     val context = LocalContext.current
+    val locationHelper = LocationHelper(context)
 
     val sPrefs = context.getSharedPreferences("sPrefs", MODE_PRIVATE)
 
@@ -170,37 +176,46 @@ fun KentRadarApp() {
     val friend = remember { mutableStateOf<User?>(null) }
     val sharingLocation = remember { mutableStateOf(sPrefs.getBoolean("sharingLocation", true)) }
 
+    val locationManager =
+        remember { locationHelper.context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
+    val isGpsActive = remember {
+        mutableStateOf(locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER))
+    }
+
+    val latitude = remember { mutableDoubleStateOf(0.0) }
+    val longitude = remember { mutableDoubleStateOf(0.0) }
+
     //Service
     if (currentUser != null) {
-        LaunchedEffect(sharingLocation.value) {
-            val intent = Intent(context, SharingService::class.java).apply {
-                action =
-                    if (sharingLocation.value) SharingService.ACTION_START else SharingService.ACTION_STOP
-            }
+        LaunchedEffect(sharingLocation.value, isGpsActive.value) {
+            if (isGpsActive.value) {
+                //Показ местоположения на карте
+                val hasFinePermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
 
-            if (sharingLocation.value) context.startForegroundService(intent)
-            else context.startService(intent)
+                if (hasFinePermission) {
+                    locationHelper.addLocationUpdateListener { location ->
+                        latitude.doubleValue = location.latitude
+                        longitude.doubleValue = location.longitude
+                    }
+                }
+
+                //Запуск сервиса
+                val intent = Intent(context, SharingService::class.java).apply {
+                    action =
+                        if (sharingLocation.value) SharingService.ACTION_START else SharingService.ACTION_STOP
+                }
+
+                if (sharingLocation.value) context.startForegroundService(intent)
+                else context.startService(intent)
+            }
 
             sPrefs.edit { putBoolean("sharingLocation", sharingLocation.value) }
         }
     }
 
     //Map
-    val locationHelper = LocationHelper(context)
-
-    val locationManager =
-        remember { locationHelper.context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
-    val isGpsActive = remember {
-        mutableStateOf(
-            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(
-                LocationManager.NETWORK_PROVIDER
-            )
-        )
-    }
-
-    val latitude = remember { mutableDoubleStateOf(0.0) }
-    val longitude = remember { mutableDoubleStateOf(0.0) }
-
     val mapStyle = if (isSystemInDarkTheme()) {
         "https://tiles.openfreemap.org/styles/fiord"
     } else {
@@ -408,10 +423,7 @@ fun Map(
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action == LocationManager.PROVIDERS_CHANGED_ACTION) {
                     val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-                    isGpsActive.value =
-                        lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(
-                            LocationManager.NETWORK_PROVIDER
-                        )
+                    isGpsActive.value = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
                 }
             }
         }
@@ -421,21 +433,6 @@ fun Map(
         )
 
         onDispose { currentContext.unregisterReceiver(gpsReceiver) }
-    }
-
-    LaunchedEffect(isGpsActive.value) {
-        if (isGpsActive.value) {
-            val hasFinePermission = ContextCompat.checkSelfPermission(
-                currentContext, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (hasFinePermission) {
-                locationHelper.addLocationUpdateListener { location ->
-                    latitude.doubleValue = location.latitude
-                    longitude.doubleValue = location.longitude
-                }
-            }
-        }
     }
 
     LaunchedEffect(isMapCentered, latitude.doubleValue, longitude.doubleValue) {
@@ -611,7 +608,7 @@ fun Friends(
 
                         if (!(friends.any { it.userName == editUserName })) {
                             val database = Firebase.database
-                            val searchRef = database.getReference("users/${editUserName}").get()
+                            val searchRef = database.getReference("users/$editUserName/uid").get()
 
                             searchRef.addOnSuccessListener {
                                 if (it.exists()) {
