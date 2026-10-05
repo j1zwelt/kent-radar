@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package ru.j1zwelt.kentradar
 
 import android.Manifest
@@ -36,9 +38,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +53,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -54,6 +61,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -256,13 +264,11 @@ fun KentRadarApp() {
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
 
         activeFriends.forEach { friend ->
-            // 1. Обертка key решает проблему с исчезновением маркеров на карте в Compose!
             key(friend.uid) {
                 val friendPoint = Point(
                     coordinates = Position(longitude = friend.longitude, latitude = friend.latitude)
                 )
 
-                // 2. Инициализируем точно так же, как твой рабочий "myGeoSource" выше по коду
                 val friendSource = rememberGeoJsonSource(
                     data = GeoJsonData.Features(friendPoint)
                 )
@@ -272,6 +278,7 @@ fun KentRadarApp() {
                     source = friendSource,
 
                     iconImage = image(painterResource(id = R.drawable.ic_friends)),
+
                     onClick = {
                         selectFriend.value = friend
                         ClickResult.Consume
@@ -427,6 +434,8 @@ fun Map(
     longitude: MutableDoubleState,
     selectFriend: MutableState<User?>
 ) {
+    val scaffoldState = rememberBottomSheetScaffoldState()
+
     val currentContext = locationHelper.context
 
     var isMapCentered by remember { mutableStateOf(false) }
@@ -467,6 +476,8 @@ fun Map(
     LaunchedEffect(selectFriend.value) {
         val currentFriend = selectFriend.value
         if (currentFriend != null) {
+            scaffoldState.bottomSheetState.expand()
+
             val position = Position(
                 latitude = currentFriend.latitude, longitude = currentFriend.longitude
             )
@@ -480,50 +491,88 @@ fun Map(
             )
 
             isMapCentered = false
-            selectFriend.value = null
         }
     }
+
 
     LaunchedEffect(mapState) {
         snapshotFlow { mapState.cameraMoveReason }.collectLatest { reason ->
             if (reason == CameraMoveReason.GESTURE) {
                 isMapCentered = false
+                selectFriend.value = null
+                scaffoldState.bottomSheetState.partialExpand()
             }
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        MaplibreMap(state = mapState)
+    LaunchedEffect(key1 = scaffoldState.bottomSheetState.targetValue) {
+        if (scaffoldState.bottomSheetState.targetValue == SheetValue.PartiallyExpanded) {
+            selectFriend.value = null
+        }
+    }
 
-        Switch(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp),
-            thumbContent = if (sharingLocation.value) {
-                {
-                    Icon(
-                        painterResource(R.drawable.ic_sharing_location),
-                        contentDescription = null,
-                        modifier = Modifier.size(SwitchDefaults.IconSize),
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 0.dp,
+        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        sheetDragHandle = { BottomSheetDefaults.DragHandle() },
+        sheetContent = {
+            val friend = selectFriend.value
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (friend != null) {
+                    Text(
+                        text = friend.name,
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+
+                    Text(
+                        text = if (friend.status == 1) stringResource(R.string.online) else stringResource(R.string.offline),
+                        color = if (friend.status == 1) Color.Green else Color.Gray
                     )
                 }
-            } else null,
-            checked = sharingLocation.value,
-            onCheckedChange = { sharingLocation.value = it })
+            }
+        }
+    ) {
+        Box(modifier = modifier.fillMaxSize()) {
+            MaplibreMap(state = mapState)
 
-        FloatingActionButton(
-            onClick = {
-                if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) isMapCentered =
-                    true
-            }, modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-        ) {
-            Icon(
-                painter = if (isMapCentered) painterResource(id = R.drawable.ic_my_location)
-                else painterResource(id = R.drawable.ic_my_location_search),
-                contentDescription = "Мое местоположение"
-            )
+            Switch(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp),
+                thumbContent = if (sharingLocation.value) {
+                    {
+                        Icon(
+                            painterResource(R.drawable.ic_sharing_location),
+                            contentDescription = null,
+                            modifier = Modifier.size(SwitchDefaults.IconSize),
+                        )
+                    }
+                } else null,
+                checked = sharingLocation.value,
+                onCheckedChange = { sharingLocation.value = it })
+
+            FloatingActionButton(
+                onClick = {
+                    if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) isMapCentered =
+                        true
+                }, modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    painter = if (isMapCentered) painterResource(id = R.drawable.ic_my_location)
+                    else painterResource(id = R.drawable.ic_my_location_search),
+                    contentDescription = "Мое местоположение"
+                )
+            }
         }
     }
 }
