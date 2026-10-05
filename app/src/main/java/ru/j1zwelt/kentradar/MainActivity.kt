@@ -9,18 +9,28 @@ import android.content.Context.MODE_PRIVATE
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +60,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -62,6 +73,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -82,6 +94,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -91,8 +107,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.google.firebase.auth.userProfileChangeRequest
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
@@ -118,6 +136,8 @@ import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.location.SharingService
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
+import java.io.File
+import java.io.FileOutputStream
 import kotlin.time.Duration.Companion.seconds
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
@@ -141,8 +161,7 @@ class MainActivity : ComponentActivity() {
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         val hasNotificationPermission = ContextCompat.checkSelfPermission(
-                            this@MainActivity,
-                            Manifest.permission.POST_NOTIFICATIONS
+                            this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
                         ) == PackageManager.PERMISSION_GRANTED
 
                         if (!hasNotificationPermission) {
@@ -151,8 +170,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     val hasLocationPermission = ContextCompat.checkSelfPermission(
-                        this@MainActivity,
-                        Manifest.permission.ACCESS_FINE_LOCATION
+                        this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
                     ) == PackageManager.PERMISSION_GRANTED
 
                     if (!hasLocationPermission) {
@@ -270,10 +288,10 @@ fun KentRadarApp() {
                 id = "my-live-location-layer", source = myGeoSource, iconImage = image(icon)
             )
         }
+
         // Friends markers
         val activeFriends =
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
-
         activeFriends.forEach { friend ->
             key(friend.uid) {
                 val friendPoint = Point(
@@ -284,17 +302,19 @@ fun KentRadarApp() {
                     data = GeoJsonData.Features(friendPoint)
                 )
 
-                SymbolLayer(
-                    id = "layer-${friend.uid}",
-                    source = friendSource,
+                val roundBitmap = getCircleBitmapWithBorder(
+                    context, R.drawable.ic_friends
+                )
 
-                    iconImage = image(painterResource(id = R.drawable.ic_friends)),
+                SymbolLayer(
+                    id = "layer-${friend.uid}", source = friendSource,
+
+                    iconImage = image(roundBitmap.asImageBitmap()),
 
                     onClick = {
                         selectFriend.value = friend
                         ClickResult.Consume
-                    }
-                )
+                    })
             }
         }
     }
@@ -364,6 +384,8 @@ fun KentRadarApp() {
     val oldUserName = remember { mutableStateOf("") }
     val name = remember { mutableStateOf(loadingStr) }
     val oldName = remember { mutableStateOf("") }
+    val avatar = remember { mutableStateOf<ImageBitmap?>(null) }
+    val oldAvatar = remember { mutableStateOf<ImageBitmap?>(null) }
 
     //Main UI
     NavigationSuiteScaffold(
@@ -371,10 +393,10 @@ fun KentRadarApp() {
             AppDestinations.entries.forEach {
                 item(
                     icon = {
-                        Icon(
-                            painterResource(it.icon), contentDescription = it.label
-                        )
-                    },
+                    Icon(
+                        painterResource(it.icon), contentDescription = it.label
+                    )
+                },
                     label = { Text(it.label) },
                     selected = it == currentDestination,
                     onClick = { currentDestination = it })
@@ -407,7 +429,9 @@ fun KentRadarApp() {
                         userName,
                         oldUserName,
                         name,
-                        oldName
+                        oldName,
+                        avatar,
+                        oldAvatar
                     )
                 }
             }
@@ -476,10 +500,8 @@ fun Map(
             )
             mapState.animateCamera(
                 update = CameraUpdate(
-                    target = position,
-                    zoom = 13.0
-                ),
-                animation = CameraAnimation.Fly(duration = 3.seconds)
+                    target = position, zoom = 13.0
+                ), animation = CameraAnimation.Fly(duration = 3.seconds)
             )
         }
     }
@@ -495,10 +517,8 @@ fun Map(
 
             mapState.animateCamera(
                 update = CameraUpdate(
-                    target = position,
-                    zoom = 13.0
-                ),
-                animation = CameraAnimation.Fly(duration = 3.seconds)
+                    target = position, zoom = 13.0
+                ), animation = CameraAnimation.Fly(duration = 3.seconds)
             )
 
             isMapCentered = false
@@ -546,13 +566,11 @@ fun Map(
                     Text(
                         text = if (friend.status == 1) stringResource(R.string.online) else stringResource(
                             R.string.offline
-                        ),
-                        color = if (friend.status == 1) Color.Green else Color.Gray
+                        ), color = if (friend.status == 1) Color.Green else Color.Gray
                     )
                 }
             }
-        }
-    ) {
+        }) {
         Box(modifier = modifier.fillMaxSize()) {
             MaplibreMap(state = mapState)
 
@@ -846,10 +864,34 @@ fun Profile(
     userName: MutableState<String>,
     oldUserName: MutableState<String>,
     name: MutableState<String>,
-    oldName: MutableState<String>
+    oldName: MutableState<String>,
+    avatar: MutableState<ImageBitmap?>,
+    oldAvatar: MutableState<ImageBitmap?>
 ) {
-    val snackBarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
     val scope = rememberCoroutineScope()
+
+    val sheetState = rememberModalBottomSheetState(true)
+    var isSheetOpen by remember { mutableStateOf(false) }
+    val snackBarHostState = remember { SnackbarHostState() }
+
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(), onResult = {
+            if (it != null) {
+                selectedImageUri = it
+            }
+        })
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview(), onResult = {
+            if (it != null) {
+                avatar.value = it.asImageBitmap()
+                selectedImageUri = null
+            }
+        })
 
     val loadingStr = stringResource(R.string.loading)
     val errorMessage = stringResource(R.string.unknown_error)
@@ -870,6 +912,38 @@ fun Profile(
             }
         }
     }
+
+    LaunchedEffect(selectedImageUri) {
+        if (selectedImageUri != null) {
+            try {
+                context.contentResolver.openInputStream(selectedImageUri!!).use { inputStream ->
+                    avatar.value = BitmapFactory.decodeStream(inputStream)?.asImageBitmap()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    if (oldAvatar.value == null) {
+        val photoUrl = currentUser?.photoUrl?.toString()
+        if (!photoUrl.isNullOrEmpty() && selectedImageUri == null) {
+            try {
+                val url = java.net.URL(photoUrl)
+                url.openStream().use { inputStream ->
+                    val downloadedBitmap = BitmapFactory.decodeStream(inputStream)
+                    if (downloadedBitmap != null) {
+                        val photo = downloadedBitmap.asImageBitmap()
+                        avatar.value = photo
+                        oldAvatar.value = photo
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = modifier
@@ -881,7 +955,8 @@ fun Profile(
             Spacer(modifier = Modifier.height(48.dp))
 
             Image(
-                painter = painterResource(id = R.drawable.ic_account_box),
+                painter = avatar.value?.let { BitmapPainter(it) }
+                ?: painterResource(id = R.drawable.ic_account_box),
                 contentDescription = stringResource(id = R.string.my_photo),
                 modifier = Modifier
                     .size(160.dp)
@@ -889,7 +964,10 @@ fun Profile(
                     .border(
                         border = BorderStroke(3.dp, MaterialTheme.colorScheme.primary),
                         shape = CircleShape
-                    ),
+                    )
+                    .clickable {
+                        isSheetOpen = true
+                    },
                 contentScale = ContentScale.Crop
             )
 
@@ -925,13 +1003,13 @@ fun Profile(
 
             Button(
                 onClick = {
-                    val newUserName = userName.value.replace("@", "").trim()
-
-                    val usersRef = database.getReference("users")
-                    val newUserNameRef = usersRef.child(newUserName).get()
-                    val oldUserNameRef = usersRef.child(oldUserName.value)
-
                     if (userName.value != oldUserName.value) {
+                        val newUserName = userName.value.replace("@", "").trim()
+
+                        val usersRef = database.getReference("users")
+                        val newUserNameRef = usersRef.child(newUserName).get()
+                        val oldUserNameRef = usersRef.child(oldUserName.value)
+
                         newUserNameRef.addOnSuccessListener { checkSnap ->
                             if (checkSnap.value == null) {
                                 reference.child("userName").setValue(newUserName)
@@ -956,9 +1034,35 @@ fun Profile(
                         reference.child("name").setValue(name.value)
                         oldName.value = name.value
                     }
+
+                    if (avatar.value != oldAvatar.value) {
+                        val tempFile =
+                            File(context.cacheDir, "temp_avatar_${currentUser!!.uid}.jpg")
+                        FileOutputStream(tempFile).use {
+                            avatar.value!!.asAndroidBitmap()
+                                .compress(Bitmap.CompressFormat.JPEG, 100, it)
+                        }
+
+                        val profileUpdates = userProfileChangeRequest {
+                            photoUri = Uri.fromFile(tempFile)
+                        }
+
+                        val updateProfile = currentUser!!.updateProfile(profileUpdates)
+                        updateProfile.addOnSuccessListener {
+                            oldAvatar.value = avatar.value
+                        }
+
+                        updateProfile.addOnFailureListener {
+                            scope.launch {
+                                snackBarHostState.showSnackbar(
+                                    it.localizedMessage ?: errorMessage
+                                )
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = userName.value != loadingStr && name.value != loadingStr && (userName.value != oldUserName.value || name.value != oldName.value)
+                enabled = userName.value != loadingStr && name.value != loadingStr && (userName.value != oldUserName.value || name.value != oldName.value || avatar.value != oldAvatar.value)
             ) {
                 Text(stringResource(R.string.save_changes))
             }
@@ -981,6 +1085,67 @@ fun Profile(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
         )
+
+        if (isSheetOpen) {
+            ModalBottomSheet(
+                onDismissRequest = { isSheetOpen = false },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle() }) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Button(
+                        onClick = {
+                            cameraLauncher.launch()
+                            isSheetOpen = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_camera_alt),
+                                contentDescription = stringResource(R.string.make_photo)
+                            )
+
+                            Text(stringResource(R.string.make_photo))
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                            isSheetOpen = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_add_photo),
+                                contentDescription = stringResource(R.string.select_from_gallery)
+                            )
+
+                            Text(
+                                stringResource(R.string.select_from_gallery),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1252,4 +1417,38 @@ fun SingIn(modifier: Modifier = Modifier) {
                 .navigationBarsPadding()
         )
     }
+}
+
+//Functions
+private fun getCircleBitmapWithBorder(
+    context: Context, resId: Int, size: Int = 150, borderWidth: Float = 6f
+): Bitmap {
+    val srcBitmap = createBitmap(size, size)
+    val srcCanvas = Canvas(srcBitmap)
+    val drawable = ContextCompat.getDrawable(context, resId)
+
+    drawable?.setBounds(0, 0, size, size)
+    drawable?.draw(srcCanvas)
+
+    val output = createBitmap(size, size)
+    val canvas = Canvas(output)
+    val paint = Paint().apply { isAntiAlias = true }
+    val radius = size / 2f
+
+    canvas.drawCircle(radius, radius, radius - borderWidth, paint)
+    paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+    canvas.drawBitmap(srcBitmap, 0f, 0f, paint)
+
+    if (borderWidth > 0) {
+        val borderPaint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = borderWidth
+            color = android.graphics.Color.WHITE
+            isAntiAlias = true
+        }
+
+        canvas.drawCircle(radius, radius, radius - borderWidth / 2f, borderPaint)
+    }
+
+    return output
 }

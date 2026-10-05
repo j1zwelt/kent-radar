@@ -31,4 +31,6 @@
     <string name="do_you_really_want_to_remove_from_friends">Do you really want to remove %s from friends?</string>
     <string name="you_are_sharing_your_location">You are sharing your location</string>
     <string name="the_app_broadcasts_your_location_to_your_friends">The app broadcasts your location to your friends</string>
+    <string name="make_photo">Make photo</string>
+    <string name="select_from_gallery">Select from gallery</string>
 </resources>
