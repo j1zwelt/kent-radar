@@ -1,5 +1,6 @@
 [versions]
 agp = "9.2.1"
+coilCompose = "2.7.0"
 coreKtx = "1.19.1"
 firebaseAuthKtx = "23.2.1"
 firebaseDatabaseKtx = "21.0.0"
@@ -16,6 +17,7 @@ maplibreComposeRuntimeVulkanAndroid = "0.19.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-auth-ktx = { module = "com.google.firebase:firebase-auth-ktx", version.ref = "firebaseAuthKtx" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }

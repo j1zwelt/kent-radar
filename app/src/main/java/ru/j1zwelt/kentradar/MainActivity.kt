@@ -108,6 +108,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
+import coil.imageLoader
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.auth.userProfileChangeRequest
@@ -115,8 +117,10 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.database
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.maplibre.compose.camera.CameraAnimation
 import org.maplibre.compose.camera.CameraMoveReason
 import org.maplibre.compose.camera.CameraPosition
@@ -138,6 +142,7 @@ import ru.j1zwelt.kentradar.location.SharingService
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URL
 import kotlin.time.Duration.Companion.seconds
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
@@ -290,6 +295,8 @@ fun KentRadarApp() {
         }
 
         // Friends markers
+        val context = LocalContext.current
+
         val activeFriends =
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
         activeFriends.forEach { friend ->
@@ -302,15 +309,26 @@ fun KentRadarApp() {
                     data = GeoJsonData.Features(friendPoint)
                 )
 
-                val roundBitmap = getCircleBitmapWithBorder(
-                    context, R.drawable.ic_friends
-                )
+                val markerPainter = remember(friend.avatarBitmap) {
+                    val currentAvatar = friend.avatarBitmap
+
+                    val finalBitmap = if (currentAvatar != null) {
+                        val nativeBitmap = currentAvatar.asAndroidBitmap()
+                        getCircleBitmapWithBorder(nativeBitmap)
+                    } else {
+                        val defaultNativeBitmap = BitmapFactory.decodeResource(
+                            context.applicationContext.resources,
+                            R.drawable.ic_friends
+                        )
+                        getCircleBitmapWithBorder(defaultNativeBitmap)
+                    }
+
+                    finalBitmap.asImageBitmap()
+                }
 
                 SymbolLayer(
                     id = "layer-${friend.uid}", source = friendSource,
-
-                    iconImage = image(roundBitmap.asImageBitmap()),
-
+                    iconImage = image(markerPainter),
                     onClick = {
                         selectFriend.value = friend
                         ClickResult.Consume
@@ -342,6 +360,7 @@ fun KentRadarApp() {
 
                                 val userName = p1.child("userName").value.toString()
                                 val name = p1.child("name").value.toString()
+                                val avatar = p1.child("avatar").value.toString()
                                 val status = p1.child("status").value.toString().toInt()
                                 val latitude = p1.child("latitude").value.toString().toDouble()
                                 val longitude = p1.child("longitude").value.toString().toDouble()
@@ -356,11 +375,35 @@ fun KentRadarApp() {
                                     isFriend.toString().toBoolean()
                                 )
 
-                                val existingIndex = friends.indexOfFirst { it.uid == user.uid }
-                                if (existingIndex != -1) {
-                                    friends[existingIndex] = user
-                                } else {
-                                    friends.add(user)
+                                CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    if (avatar.isNotEmpty()) {
+                                        try {
+                                            val request = coil.request.ImageRequest.Builder(context)
+                                                .data(avatar)
+                                                .build()
+
+                                            val resultDrawable =
+                                                context.imageLoader.execute(request).drawable
+
+                                            if (resultDrawable is android.graphics.drawable.BitmapDrawable) {
+                                                val composeImageBitmap =
+                                                    resultDrawable.bitmap.asImageBitmap()
+                                                user.avatarBitmap = composeImageBitmap
+                                            }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+                                    }
+
+                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                        val existingIndex =
+                                            friends.indexOfFirst { it.uid == user.uid }
+                                        if (existingIndex != -1) {
+                                            friends[existingIndex] = user
+                                        } else {
+                                            friends.add(user)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -393,10 +436,10 @@ fun KentRadarApp() {
             AppDestinations.entries.forEach {
                 item(
                     icon = {
-                    Icon(
-                        painterResource(it.icon), contentDescription = it.label
-                    )
-                },
+                        Icon(
+                            painterResource(it.icon), contentDescription = it.label
+                        )
+                    },
                     label = { Text(it.label) },
                     selected = it == currentDestination,
                     onClick = { currentDestination = it })
@@ -798,7 +841,8 @@ fun User(
             modifier = Modifier.size(54.dp)
         ) {
             Image(
-                painter = painterResource(id = R.drawable.ic_account_box),
+                painter = user.avatarBitmap?.let { BitmapPainter(it) }
+                    ?: painterResource(id = R.drawable.ic_account_box),
                 contentDescription = stringResource(id = R.string.my_photo),
                 modifier = Modifier
                     .fillMaxSize()
@@ -929,7 +973,7 @@ fun Profile(
         val photoUrl = currentUser?.photoUrl?.toString()
         if (!photoUrl.isNullOrEmpty() && selectedImageUri == null) {
             try {
-                val url = java.net.URL(photoUrl)
+                val url = URL(photoUrl)
                 url.openStream().use { inputStream ->
                     val downloadedBitmap = BitmapFactory.decodeStream(inputStream)
                     if (downloadedBitmap != null) {
@@ -956,7 +1000,7 @@ fun Profile(
 
             Image(
                 painter = avatar.value?.let { BitmapPainter(it) }
-                ?: painterResource(id = R.drawable.ic_account_box),
+                    ?: painterResource(id = R.drawable.ic_account_box),
                 contentDescription = stringResource(id = R.string.my_photo),
                 modifier = Modifier
                     .size(160.dp)
@@ -1050,6 +1094,13 @@ fun Profile(
                         val updateProfile = currentUser!!.updateProfile(profileUpdates)
                         updateProfile.addOnSuccessListener {
                             oldAvatar.value = avatar.value
+
+                            val freshUser = Firebase.auth.currentUser
+                            val networkPhotoUrl = freshUser?.photoUrl?.toString()
+
+                            if (!networkPhotoUrl.isNullOrEmpty()) {
+                                reference.child("avatar").setValue(networkPhotoUrl)
+                            }
                         }
 
                         updateProfile.addOnFailureListener {
@@ -1421,23 +1472,27 @@ fun SingIn(modifier: Modifier = Modifier) {
 
 //Functions
 private fun getCircleBitmapWithBorder(
-    context: Context, resId: Int, size: Int = 150, borderWidth: Float = 6f
+    bitmap: Bitmap, size: Int = 120, borderWidth: Float = 6f
 ): Bitmap {
-    val srcBitmap = createBitmap(size, size)
-    val srcCanvas = Canvas(srcBitmap)
-    val drawable = ContextCompat.getDrawable(context, resId)
+    val softwareBitmap = if (bitmap.config == Bitmap.Config.HARDWARE) {
+        bitmap.copy(Bitmap.Config.ARGB_8888, false)
+    } else {
+        bitmap
+    }
 
-    drawable?.setBounds(0, 0, size, size)
-    drawable?.draw(srcCanvas)
+    val scaledSrc = softwareBitmap.scale(size, size)
 
     val output = createBitmap(size, size)
     val canvas = Canvas(output)
-    val paint = Paint().apply { isAntiAlias = true }
+
+    val paint = Paint().apply {
+        isAntiAlias = true
+    }
     val radius = size / 2f
 
     canvas.drawCircle(radius, radius, radius - borderWidth, paint)
     paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-    canvas.drawBitmap(srcBitmap, 0f, 0f, paint)
+    canvas.drawBitmap(scaledSrc, 0f, 0f, paint)
 
     if (borderWidth > 0) {
         val borderPaint = Paint().apply {
@@ -1446,7 +1501,6 @@ private fun getCircleBitmapWithBorder(
             color = android.graphics.Color.WHITE
             isAntiAlias = true
         }
-
         canvas.drawCircle(radius, radius, radius - borderWidth / 2f, borderPaint)
     }
 
