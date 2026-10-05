@@ -132,25 +132,36 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KentRadarTheme {
-                val launcher =
-                    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+                val launcher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestMultiplePermissions()
+                ) {}
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val hasNotificationPermission = ContextCompat.checkSelfPermission(
-                        this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
+                LaunchedEffect(Unit) {
+                    val permissionsToRequest = mutableListOf<String>()
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val hasNotificationPermission = ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (!hasNotificationPermission) {
+                            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+
+                    val hasLocationPermission = ContextCompat.checkSelfPermission(
+                        this@MainActivity,
+                        Manifest.permission.ACCESS_FINE_LOCATION
                     ) == PackageManager.PERMISSION_GRANTED
 
-                    if (!hasNotificationPermission) {
-                        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    if (!hasLocationPermission) {
+                        permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
                     }
-                }
 
-                val hasLocationPermission = ContextCompat.checkSelfPermission(
-                    this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-
-                if (!hasLocationPermission) {
-                    launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    if (permissionsToRequest.isNotEmpty()) {
+                        launcher.launch(permissionsToRequest.toTypedArray())
+                    }
                 }
 
                 if (currentUser != null) KentRadarApp()
@@ -533,7 +544,9 @@ fun Map(
                     )
 
                     Text(
-                        text = if (friend.status == 1) stringResource(R.string.online) else stringResource(R.string.offline),
+                        text = if (friend.status == 1) stringResource(R.string.online) else stringResource(
+                            R.string.offline
+                        ),
                         color = if (friend.status == 1) Color.Green else Color.Gray
                     )
                 }
