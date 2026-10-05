@@ -91,6 +91,7 @@ import kotlinx.coroutines.launch
 import org.maplibre.compose.camera.CameraMoveReason
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.compose.expressions.dsl.image
+import org.maplibre.compose.interaction.ClickResult
 import org.maplibre.compose.layers.SymbolLayer
 import org.maplibre.compose.map.MapState
 import org.maplibre.compose.map.MaplibreMap
@@ -173,7 +174,7 @@ fun KentRadarApp() {
     val sPrefs = context.getSharedPreferences("sPrefs", MODE_PRIVATE)
 
     val friends = remember { mutableStateListOf<User>() }
-    val friend = remember { mutableStateOf<User?>(null) }
+    val selectFriend = remember { mutableStateOf<User?>(null) }
     val sharingLocation = remember { mutableStateOf(sPrefs.getBoolean("sharingLocation", true)) }
 
     val locationManager =
@@ -189,7 +190,6 @@ fun KentRadarApp() {
     if (currentUser != null) {
         LaunchedEffect(sharingLocation.value, isGpsActive.value) {
             if (isGpsActive.value) {
-                //Показ местоположения на карте
                 val hasFinePermission = ContextCompat.checkSelfPermission(
                     context, Manifest.permission.ACCESS_FINE_LOCATION
                 ) == PackageManager.PERMISSION_GRANTED
@@ -201,7 +201,6 @@ fun KentRadarApp() {
                     }
                 }
 
-                //Запуск сервиса
                 val intent = Intent(context, SharingService::class.java).apply {
                     action =
                         if (sharingLocation.value) SharingService.ACTION_START else SharingService.ACTION_STOP
@@ -262,7 +261,11 @@ fun KentRadarApp() {
             SymbolLayer(
                 id = "layer-${friend.uid}",
                 source = friendSource,
-                iconImage = image(painterResource(id = R.drawable.ic_friends))
+                iconImage = image(painterResource(id = R.drawable.ic_friends)),
+                onClick = {
+                    selectFriend.value = friend
+                    ClickResult.Consume
+                }
             )
         }
     }
@@ -359,13 +362,13 @@ fun KentRadarApp() {
                         sharingLocation,
                         latitude,
                         longitude,
-                        friend
+                        selectFriend
                     )
                 }
 
                 AppDestinations.FRIENDS -> {
                     Friends(
-                        modifier = Modifier.padding(innerPadding), friends, friend
+                        modifier = Modifier.padding(innerPadding), friends, selectFriend
                     ) { currentDestination = AppDestinations.MAP }
                 }
 
@@ -411,7 +414,7 @@ fun Map(
     sharingLocation: MutableState<Boolean>,
     latitude: MutableDoubleState,
     longitude: MutableDoubleState,
-    friend: MutableState<User?>
+    selectFriend: MutableState<User?>
 ) {
     val currentContext = locationHelper.context
 
@@ -447,8 +450,8 @@ fun Map(
         }
     }
 
-    LaunchedEffect(friend.value) {
-        val currentFriend = friend.value
+    LaunchedEffect(selectFriend.value) {
+        val currentFriend = selectFriend.value
         if (currentFriend != null) {
             val position = Position(
                 latitude = currentFriend.latitude, longitude = currentFriend.longitude
@@ -459,7 +462,7 @@ fun Map(
             )
 
             isMapCentered = false
-            friend.value = null
+            selectFriend.value = null
         }
     }
 
@@ -511,7 +514,7 @@ fun Map(
 fun Friends(
     modifier: Modifier = Modifier,
     friends: SnapshotStateList<User>,
-    friend: MutableState<User?>,
+    selectFriend: MutableState<User?>,
     onNavigateToMap: () -> Unit
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -528,7 +531,7 @@ fun Friends(
         LazyColumn {
             items(friends) { user ->
                 User(user, onClick = {
-                    friend.value = user
+                    selectFriend.value = user
                     onNavigateToMap()
                 }, onLongClick = {
                     removableFriend = user
