@@ -60,6 +60,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableDoubleState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -90,8 +91,10 @@ import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.database
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import org.maplibre.compose.camera.CameraAnimation
 import org.maplibre.compose.camera.CameraMoveReason
 import org.maplibre.compose.camera.CameraPosition
+import org.maplibre.compose.camera.CameraUpdate
 import org.maplibre.compose.expressions.dsl.image
 import org.maplibre.compose.interaction.ClickResult
 import org.maplibre.compose.layers.SymbolLayer
@@ -248,27 +251,33 @@ fun KentRadarApp() {
                 id = "my-live-location-layer", source = myGeoSource, iconImage = image(icon)
             )
         }
-
-        //Friends markers
+        // Friends markers
         val activeFriends =
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
+
         activeFriends.forEach { friend ->
-            val friendPoint =
-                Point(Position(longitude = friend.longitude, latitude = friend.latitude))
+            // 1. Обертка key решает проблему с исчезновением маркеров на карте в Compose!
+            key(friend.uid) {
+                val friendPoint = Point(
+                    coordinates = Position(longitude = friend.longitude, latitude = friend.latitude)
+                )
 
-            val friendSource = rememberGeoJsonSource(
-                data = GeoJsonData.Features(friendPoint)
-            )
+                // 2. Инициализируем точно так же, как твой рабочий "myGeoSource" выше по коду
+                val friendSource = rememberGeoJsonSource(
+                    data = GeoJsonData.Features(friendPoint)
+                )
 
-            SymbolLayer(
-                id = "layer-${friend.uid}",
-                source = friendSource,
-                iconImage = image(painterResource(id = R.drawable.ic_friends)),
-                onClick = {
-                    selectFriend.value = friend
-                    ClickResult.Consume
-                }
-            )
+                SymbolLayer(
+                    id = "layer-${friend.uid}",
+                    source = friendSource,
+
+                    iconImage = image(painterResource(id = R.drawable.ic_friends)),
+                    onClick = {
+                        selectFriend.value = friend
+                        ClickResult.Consume
+                    }
+                )
+            }
         }
     }
 
@@ -445,9 +454,12 @@ fun Map(
             val position = Position(
                 latitude = latitude.doubleValue, longitude = longitude.doubleValue
             )
-            mapState.animateCameraPosition(
-                position = mapState.cameraPosition.copy(target = position, zoom = 13.0),
-                duration = 2.seconds
+            mapState.animateCamera(
+                update = CameraUpdate(
+                    target = position,
+                    zoom = 13.0
+                ),
+                animation = CameraAnimation.Fly(duration = 3.seconds)
             )
         }
     }
@@ -458,9 +470,13 @@ fun Map(
             val position = Position(
                 latitude = currentFriend.latitude, longitude = currentFriend.longitude
             )
-            mapState.animateCameraPosition(
-                position = mapState.cameraPosition.copy(target = position, zoom = 13.0),
-                duration = 2.seconds
+
+            mapState.animateCamera(
+                update = CameraUpdate(
+                    target = position,
+                    zoom = 13.0
+                ),
+                animation = CameraAnimation.Fly(duration = 3.seconds)
             )
 
             isMapCentered = false
