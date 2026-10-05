@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -71,6 +72,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -696,32 +698,39 @@ fun User(
             .combinedClickable(onClick = { onClick() }, onLongClick = { onLongClick() })
             .padding(16.dp), verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.ic_account_box),
-            contentDescription = stringResource(id = R.string.my_photo),
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .border(
-                    border = BorderStroke(
-                        width = 2.dp, color = MaterialTheme.colorScheme.primary
-                    ), shape = CircleShape
-                ),
-            contentScale = ContentScale.Crop
-        )
+        Box(
+            modifier = Modifier.size(54.dp)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_account_box),
+                contentDescription = stringResource(id = R.string.my_photo),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .border(
+                        border = BorderStroke(
+                            width = 2.dp, color = MaterialTheme.colorScheme.primary
+                        ), shape = CircleShape
+                    ),
+                contentScale = ContentScale.Crop
+            )
+
+            if (user.status == 1) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .align(Alignment.BottomEnd)
+                        .background(Color.Green, CircleShape)
+                        .border(1.5.dp, Color.White, CircleShape)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(user.name, style = MaterialTheme.typography.titleLarge)
-            Text(user.userName, style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = when (user.status) {
-                    0 -> stringResource(R.string.offline)
-                    1 -> stringResource(R.string.online)
-                    else -> stringResource(R.string.offline)
-                }, style = MaterialTheme.typography.titleSmall
-            )
+            Text(user.userName, style = MaterialTheme.typography.titleSmall)
         }
 
         if (!user.isFriend) {
