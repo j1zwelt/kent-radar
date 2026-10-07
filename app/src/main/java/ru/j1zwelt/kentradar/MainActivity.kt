@@ -20,6 +20,7 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -112,15 +113,14 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
-import coil.imageLoader
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.auth.userProfileChangeRequest
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.database
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -143,9 +143,7 @@ import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.location.SharingService
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
-import java.io.File
-import java.io.FileOutputStream
-import java.net.URL
+import java.io.ByteArrayOutputStream
 import kotlin.time.Duration.Companion.seconds
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
@@ -155,8 +153,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        currentUser = Firebase.auth.currentUser
 
         setContent {
             KentRadarTheme {
@@ -311,7 +307,8 @@ fun KentRadarApp() {
                 drawable.setBounds(0, 0, sizeInPixels, sizeInPixels)
                 drawable.draw(canvas)
             }
-            getCircleBitmapWithBorder(output)
+
+            output.toCircleBitmap()
         }
 
         val activeFriends =
@@ -331,7 +328,7 @@ fun KentRadarApp() {
 
                     val finalBitmap = if (currentAvatar != null) {
                         val nativeBitmap = currentAvatar.asAndroidBitmap()
-                        getCircleBitmapWithBorder(nativeBitmap)
+                        nativeBitmap.toCircleBitmap()
                     } else defaultBitmapAvatar
 
                     BitmapPainter(finalBitmap.asImageBitmap())
@@ -371,7 +368,7 @@ fun KentRadarApp() {
 
                                 val userName = p1.child("userName").value.toString()
                                 val name = p1.child("name").value.toString()
-                                val avatar = p1.child("avatar").value.toString()
+                                val avatarBase64 = p1.child("avatar").value.toString()
                                 val status = p1.child("status").value.toString().toInt()
                                 val latitude = p1.child("latitude").value.toString().toDouble()
                                 val longitude = p1.child("longitude").value.toString().toDouble()
@@ -386,27 +383,13 @@ fun KentRadarApp() {
                                     isFriend.toString().toBoolean()
                                 )
 
-                                CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                    if (avatar.isNotEmpty()) {
-                                        try {
-                                            val request = coil.request.ImageRequest.Builder(context)
-                                                .data(avatar)
-                                                .build()
-
-                                            val resultDrawable =
-                                                context.imageLoader.execute(request).drawable
-
-                                            if (resultDrawable is android.graphics.drawable.BitmapDrawable) {
-                                                val composeImageBitmap =
-                                                    resultDrawable.bitmap.asImageBitmap()
-                                                user.avatarBitmap = composeImageBitmap
-                                            }
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                        }
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    if (avatarBase64.isNotEmpty()) {
+                                        val avatarBitmap = avatarBase64.decodeBase64Image()
+                                        user.avatarBitmap = avatarBitmap
                                     }
 
-                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    withContext(Dispatchers.Main) {
                                         val existingIndex =
                                             friends.indexOfFirst { it.uid == user.uid }
                                         if (existingIndex != -1) {
@@ -981,21 +964,12 @@ fun Profile(
     }
 
     if (oldAvatar.value == null) {
-        val photoUrl = currentUser?.photoUrl?.toString()
-        if (!photoUrl.isNullOrEmpty() && selectedImageUri == null) {
-            try {
-                val url = URL(photoUrl)
-                url.openStream().use { inputStream ->
-                    val downloadedBitmap = BitmapFactory.decodeStream(inputStream)
-                    if (downloadedBitmap != null) {
-                        val photo = downloadedBitmap.asImageBitmap()
-                        avatar.value = photo
-                        oldAvatar.value = photo
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+        reference.child("avatar").get().addOnSuccessListener {
+            val avatarBase64 = it.value.toString()
+            val avatarBitmap = avatarBase64.decodeBase64Image()
+
+            avatar.value = avatarBitmap
+            oldAvatar.value = avatarBitmap
         }
     }
 
@@ -1023,7 +997,7 @@ fun Profile(
                     .clickable {
                         isSheetOpen = true
                     },
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.FillBounds
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -1091,36 +1065,24 @@ fun Profile(
                     }
 
                     if (avatar.value != oldAvatar.value) {
-                        val tempFile =
-                            File(context.cacheDir, "temp_avatar_${currentUser!!.uid}.jpg")
-                        FileOutputStream(tempFile).use {
-                            avatar.value!!.asAndroidBitmap()
-                                .compress(Bitmap.CompressFormat.JPEG, 100, it)
-                        }
+                        val androidBitmap = avatar.value!!.asAndroidBitmap()
+                        val byteArrayOutputStream = ByteArrayOutputStream()
 
-                        val profileUpdates = userProfileChangeRequest {
-                            photoUri = Uri.fromFile(tempFile)
-                        }
+                        val scaledBitmap = androidBitmap.scale(120, 120)
+                        scaledBitmap.compress(
+                            Bitmap.CompressFormat.JPEG,
+                            100,
+                            byteArrayOutputStream
+                        )
 
-                        val updateProfile = currentUser!!.updateProfile(profileUpdates)
-                        updateProfile.addOnSuccessListener {
-                            oldAvatar.value = avatar.value
+                        val byteArray = byteArrayOutputStream.toByteArray()
 
-                            val freshUser = Firebase.auth.currentUser
-                            val networkPhotoUrl = freshUser?.photoUrl?.toString()
+                        val base64String = Base64.encodeToString(byteArray, Base64.DEFAULT)
+                        val finalBase64Data = "$base64String"
 
-                            if (!networkPhotoUrl.isNullOrEmpty()) {
-                                reference.child("avatar").setValue(networkPhotoUrl)
-                            }
-                        }
+                        reference.child("avatar").setValue(finalBase64Data)
 
-                        updateProfile.addOnFailureListener {
-                            scope.launch {
-                                snackBarHostState.showSnackbar(
-                                    it.localizedMessage ?: errorMessage
-                                )
-                            }
-                        }
+                        oldAvatar.value = avatar.value
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -1482,14 +1444,12 @@ fun SingIn(modifier: Modifier = Modifier) {
 }
 
 //Functions
-private fun getCircleBitmapWithBorder(
-    bitmap: Bitmap, size: Int = 120, borderWidth: Float = 6f
+private fun Bitmap.toCircleBitmap(
+    size: Int = 120, borderWidth: Float = 6f
 ): Bitmap {
-    val softwareBitmap = if (bitmap.config == Bitmap.Config.HARDWARE) {
-        bitmap.copy(Bitmap.Config.ARGB_8888, false)
-    } else {
-        bitmap
-    }
+    val softwareBitmap = if (this.config == Bitmap.Config.HARDWARE) {
+        this.copy(Bitmap.Config.ARGB_8888, false)
+    } else this
 
     val scaledSrc = softwareBitmap.scale(size, size)
 
@@ -1516,4 +1476,15 @@ private fun getCircleBitmapWithBorder(
     }
 
     return output
+}
+
+fun String.decodeBase64Image(): ImageBitmap? {
+    return try {
+        val imageBytes = Base64.decode(this, Base64.DEFAULT)
+        val decodedBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        decodedBitmap?.asImageBitmap()
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
 }
