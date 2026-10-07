@@ -3,6 +3,7 @@
 package ru.j1zwelt.kentradar
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
@@ -19,6 +20,7 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -100,6 +102,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -210,6 +213,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@SuppressLint("UseKtx")
 @Composable
 fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
@@ -296,6 +300,19 @@ fun KentRadarApp() {
 
         // Friends markers
         val context = LocalContext.current
+        val density = LocalDensity.current
+        val sizeInPixels = remember(density) { with(density) { 30.dp.roundToPx() } }
+
+        val defaultBitmapAvatar = remember(sizeInPixels) {
+            val drawable = ContextCompat.getDrawable(context, R.drawable.ic_account_box)
+            val output = Bitmap.createBitmap(sizeInPixels, sizeInPixels, Bitmap.Config.ARGB_8888)
+            if (drawable != null) {
+                val canvas = Canvas(output)
+                drawable.setBounds(0, 0, sizeInPixels, sizeInPixels)
+                drawable.draw(canvas)
+            }
+            getCircleBitmapWithBorder(output)
+        }
 
         val activeFriends =
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
@@ -315,15 +332,9 @@ fun KentRadarApp() {
                     val finalBitmap = if (currentAvatar != null) {
                         val nativeBitmap = currentAvatar.asAndroidBitmap()
                         getCircleBitmapWithBorder(nativeBitmap)
-                    } else {
-                        val defaultNativeBitmap = BitmapFactory.decodeResource(
-                            context.applicationContext.resources,
-                            R.drawable.ic_friends
-                        )
-                        getCircleBitmapWithBorder(defaultNativeBitmap)
-                    }
+                    } else defaultBitmapAvatar
 
-                    finalBitmap.asImageBitmap()
+                    BitmapPainter(finalBitmap.asImageBitmap())
                 }
 
                 SymbolLayer(
@@ -409,14 +420,14 @@ fun KentRadarApp() {
                         }
 
                         override fun onCancelled(p0: DatabaseError) {
-                            TODO("Not yet implemented")
+                            Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
                         }
                     })
                 }
             }
 
             override fun onCancelled(p0: DatabaseError) {
-                TODO("Not yet implemented")
+                Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
             }
         })
     }
