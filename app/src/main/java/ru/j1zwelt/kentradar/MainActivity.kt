@@ -848,7 +848,14 @@ fun User(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = { onClick() }, onLongClick = { onLongClick() })
+            .let {
+                if (user.isFriend) {
+                    it.combinedClickable(
+                        onClick = { onClick() },
+                        onLongClick = { onLongClick() }
+                    )
+                } else it
+            }
             .padding(16.dp), verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
