@@ -33,4 +33,7 @@
     <string name="the_app_broadcasts_your_location_to_your_friends">The app broadcasts your location to your friends</string>
     <string name="make_photo">Make photo</string>
     <string name="select_from_gallery">Select from gallery</string>
+    <string name="my_location">My location</string>
+    <string name="build_a_route_to">Build a route to %1$s</string>
+    <string name="no_applications_found">No applications found</string>
 </resources>

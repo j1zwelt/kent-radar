@@ -3,6 +3,7 @@
 package ru.j1zwelt.kentradar
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
@@ -112,6 +113,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import androidx.core.net.toUri
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.DataSnapshot
@@ -333,7 +335,8 @@ fun KentRadarApp() {
                 }
 
                 SymbolLayer(
-                    id = "layer-${friend.uid}", source = friendSource,
+                    id = "layer-${friend.uid}",
+                    source = friendSource,
                     iconImage = image(markerPainter),
                     onClick = {
                         selectFriend.value = friend
@@ -401,16 +404,17 @@ fun KentRadarApp() {
                         }
 
                         override fun onCancelled(p0: DatabaseError) {
-                            if (currentUser != null)
-                                Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
+                            if (currentUser != null) Toast.makeText(
+                                context, p0.message, Toast.LENGTH_LONG
+                            ).show()
                         }
                     })
                 }
             }
 
             override fun onCancelled(p0: DatabaseError) {
-                if (currentUser != null)
-                    Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
+                if (currentUser != null) Toast.makeText(context, p0.message, Toast.LENGTH_LONG)
+                    .show()
             }
         })
     }
@@ -507,10 +511,11 @@ fun Map(
     selectFriend: MutableState<User?>
 ) {
     val scaffoldState = rememberBottomSheetScaffoldState()
-
-    val currentContext = locationHelper.context
+    val context = locationHelper.context
 
     var isMapCentered by remember { mutableStateOf(false) }
+
+    val errorMessage = stringResource(R.string.no_applications_found)
 
     DisposableEffect(key1 = Unit) {
         val filter = IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
@@ -524,10 +529,10 @@ fun Map(
         }
 
         ContextCompat.registerReceiver(
-            currentContext, gpsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+            context, gpsReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
-        onDispose { currentContext.unregisterReceiver(gpsReceiver) }
+        onDispose { context.unregisterReceiver(gpsReceiver) }
     }
 
     LaunchedEffect(isMapCentered, latitude.doubleValue, longitude.doubleValue) {
@@ -605,6 +610,23 @@ fun Map(
                             R.string.offline
                         ), color = if (friend.status == 1) Color.Green else Color.Gray
                     )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(), onClick = {
+                            try {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW, "geo:0,0?q=${friend.latitude},${friend.longitude}".toUri()
+                                )
+                                context.startActivity(intent)
+                            } catch (e: ActivityNotFoundException) {
+                                Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
+                                e.printStackTrace()
+                            }
+                        }) {
+                        Text(stringResource(R.string.build_a_route_to, friend.name))
+                    }
                 }
             }
         }) {
@@ -628,17 +650,16 @@ fun Map(
                 onCheckedChange = { sharingLocation.value = it })
 
             FloatingActionButton(
-                onClick = {
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp), onClick = {
                     if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) isMapCentered =
                         true
-                }, modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
+                }) {
                 Icon(
                     painter = if (isMapCentered) painterResource(id = R.drawable.ic_my_location)
                     else painterResource(id = R.drawable.ic_my_location_search),
-                    contentDescription = "Мое местоположение"
+                    contentDescription = stringResource(R.string.my_location),
                 )
             }
         }
@@ -706,12 +727,11 @@ fun Friends(
         }
 
         FloatingActionButton(
-            onClick = {
-                showSendDialog = true
-            }, modifier = Modifier
+            modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(16.dp)
-        ) {
+                .padding(16.dp), onClick = {
+                showSendDialog = true
+            }) {
             Icon(
                 painter = painterResource(id = R.drawable.ic_add),
                 contentDescription = "Добавить кента"
@@ -834,9 +854,8 @@ fun User(
         Box(
             modifier = Modifier.size(54.dp)
         ) {
-            Image(
-                painter = user.avatarBitmap?.let { BitmapPainter(it) }
-                    ?: painterResource(id = R.drawable.ic_account_box),
+            Image(painter = user.avatarBitmap?.let { BitmapPainter(it) }
+                ?: painterResource(id = R.drawable.ic_account_box),
                 contentDescription = stringResource(id = R.string.my_photo),
                 modifier = Modifier
                     .fillMaxSize()
@@ -846,8 +865,7 @@ fun User(
                             width = 2.dp, color = MaterialTheme.colorScheme.primary
                         ), shape = CircleShape
                     ),
-                contentScale = ContentScale.Crop
-            )
+                contentScale = ContentScale.Crop)
 
             if (user.status == 1) {
                 Box(
@@ -860,7 +878,7 @@ fun User(
             }
         }
 
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(user.name, style = MaterialTheme.typography.titleLarge)
@@ -981,7 +999,7 @@ fun Profile(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(Modifier.height(48.dp))
 
             Image(
                 painter = avatar.value?.let { BitmapPainter(it) }
@@ -1000,7 +1018,7 @@ fun Profile(
                 contentScale = ContentScale.FillBounds
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = userName.value,
@@ -1018,7 +1036,7 @@ fun Profile(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = name.value,
@@ -1028,9 +1046,10 @@ fun Profile(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             Button(
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     if (userName.value != oldUserName.value) {
                         val newUserName = userName.value.replace("@", "").trim()
@@ -1070,9 +1089,7 @@ fun Profile(
 
                         val scaledBitmap = androidBitmap.scale(160, 160)
                         scaledBitmap.compress(
-                            Bitmap.CompressFormat.JPEG,
-                            75,
-                            byteArrayOutputStream
+                            Bitmap.CompressFormat.JPEG, 75, byteArrayOutputStream
                         )
 
                         val byteArray = byteArrayOutputStream.toByteArray()
@@ -1085,20 +1102,18 @@ fun Profile(
                         oldAvatar.value = avatar.value
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
                 enabled = userName.value != loadingStr && name.value != loadingStr && (userName.value != oldUserName.value || name.value != oldName.value || avatar.value != oldAvatar.value)
             ) {
                 Text(stringResource(R.string.save_changes))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedButton(
-                onClick = {
+                modifier = Modifier.fillMaxWidth(), onClick = {
                     Firebase.auth.signOut()
                     currentUser = null
-                }, modifier = Modifier.fillMaxWidth()
-            ) {
+                }) {
                 Text(stringResource(R.string.sign_out))
             }
         }
@@ -1124,12 +1139,10 @@ fun Profile(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Button(
-                        onClick = {
+                        modifier = Modifier.fillMaxWidth(), onClick = {
                             cameraLauncher.launch()
                             isSheetOpen = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                        }) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -1144,14 +1157,12 @@ fun Profile(
                     }
 
                     OutlinedButton(
-                        onClick = {
+                        modifier = Modifier.fillMaxWidth(), onClick = {
                             photoPickerLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
                             isSheetOpen = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                        }) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -1203,7 +1214,7 @@ fun Register(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.headlineSmall
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email,
@@ -1214,7 +1225,7 @@ fun Register(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = userName,
@@ -1235,7 +1246,7 @@ fun Register(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = name,
@@ -1246,7 +1257,7 @@ fun Register(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = password1,
@@ -1258,7 +1269,7 @@ fun Register(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = password2,
@@ -1270,9 +1281,10 @@ fun Register(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             Button(
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     if (password1 == password2) {
                         val newUserName = userName.replace("@", "").trim()
@@ -1326,19 +1338,17 @@ fun Register(modifier: Modifier = Modifier) {
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
                 enabled = email.isNotEmpty() && userName.isNotEmpty() && password1.isNotEmpty() && password2.isNotEmpty()
             ) {
                 Text(stringResource(id = R.string.register))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedButton(
-                onClick = {
+                modifier = Modifier.fillMaxWidth(), onClick = {
                     currentAuthScreen = "sign_in"
-                }, modifier = Modifier.fillMaxWidth()
-            ) {
+                }) {
                 Text(stringResource(R.string.sign_in))
             }
         }
@@ -1375,7 +1385,7 @@ fun SingIn(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.headlineSmall
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email,
@@ -1386,7 +1396,7 @@ fun SingIn(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = password,
@@ -1398,10 +1408,10 @@ fun SingIn(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             Button(
-                onClick = {
+                modifier = Modifier.fillMaxWidth(), onClick = {
                     val auth = Firebase.auth
                     val signIn = auth.signInWithEmailAndPassword(email, password)
 
@@ -1416,20 +1426,17 @@ fun SingIn(modifier: Modifier = Modifier) {
                             )
                         }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = email.isNotEmpty() && password.isNotEmpty()
+                }, enabled = email.isNotEmpty() && password.isNotEmpty()
             ) {
                 Text(stringResource(id = R.string.sign_in))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             OutlinedButton(
-                onClick = {
+                modifier = Modifier.fillMaxWidth(), onClick = {
                     currentAuthScreen = "register"
-                }, modifier = Modifier.fillMaxWidth()
-            ) {
+                }) {
                 Text(stringResource(R.string.register))
             }
         }
