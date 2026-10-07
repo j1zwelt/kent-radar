@@ -618,7 +618,6 @@ fun Map(
         }
     }
 
-
     LaunchedEffect(mapState) {
         snapshotFlow { mapState.cameraMoveReason }.collectLatest { reason ->
             if (reason == CameraMoveReason.GESTURE) {
@@ -695,8 +694,9 @@ fun Map(
                                 e.printStackTrace()
                             } finally {
                                 scope.launch {
-                                    scaffoldState.bottomSheetState.partialExpand()
+                                    isMapCentered = false
                                     selectFriend.value = null
+                                    scaffoldState.bottomSheetState.partialExpand()
                                 }
                             }
                         }) {
