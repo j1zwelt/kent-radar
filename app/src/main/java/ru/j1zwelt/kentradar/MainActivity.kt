@@ -3,7 +3,6 @@
 package ru.j1zwelt.kentradar
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
@@ -209,7 +208,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@SuppressLint("UseKtx")
 @Composable
 fun KentRadarApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.MAP) }
@@ -301,7 +299,7 @@ fun KentRadarApp() {
 
         val defaultBitmapAvatar = remember(sizeInPixels) {
             val drawable = ContextCompat.getDrawable(context, R.drawable.ic_account_box)
-            val output = Bitmap.createBitmap(sizeInPixels, sizeInPixels, Bitmap.Config.ARGB_8888)
+            val output = createBitmap(sizeInPixels, sizeInPixels)
             if (drawable != null) {
                 val canvas = Canvas(output)
                 drawable.setBounds(0, 0, sizeInPixels, sizeInPixels)
@@ -403,14 +401,16 @@ fun KentRadarApp() {
                         }
 
                         override fun onCancelled(p0: DatabaseError) {
-                            Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
+                            if (currentUser != null)
+                                Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
                         }
                     })
                 }
             }
 
             override fun onCancelled(p0: DatabaseError) {
-                Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
+                if (currentUser != null)
+                    Toast.makeText(context, p0.message, Toast.LENGTH_LONG).show()
             }
         })
     }
@@ -1068,10 +1068,10 @@ fun Profile(
                         val androidBitmap = avatar.value!!.asAndroidBitmap()
                         val byteArrayOutputStream = ByteArrayOutputStream()
 
-                        val scaledBitmap = androidBitmap.scale(120, 120)
+                        val scaledBitmap = androidBitmap.scale(160, 160)
                         scaledBitmap.compress(
                             Bitmap.CompressFormat.JPEG,
-                            100,
+                            75,
                             byteArrayOutputStream
                         )
 
