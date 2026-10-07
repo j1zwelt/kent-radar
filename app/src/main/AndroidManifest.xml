@@ -4,7 +4,6 @@
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE"
         tools:ignore="ForegroundServicesPolicy" />
@@ -20,6 +19,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.KentRadar">
+        <receiver
+            android:name=".location.BatteryReceiver"
+            android:enabled="true"
+            android:exported="true"
+            tools:ignore="ExportedReceiver,Instantiatable" />
+
         <service
             android:name=".location.SharingService"
             android:enabled="true"

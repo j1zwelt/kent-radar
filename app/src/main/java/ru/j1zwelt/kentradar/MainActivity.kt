@@ -85,6 +85,8 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -404,17 +406,14 @@ fun KentRadarApp() {
                         }
 
                         override fun onCancelled(p0: DatabaseError) {
-                            if (currentUser != null) Toast.makeText(
-                                context, p0.message, Toast.LENGTH_LONG
-                            ).show()
+                            p0.toException().printStackTrace()
                         }
                     })
                 }
             }
 
             override fun onCancelled(p0: DatabaseError) {
-                if (currentUser != null) Toast.makeText(context, p0.message, Toast.LENGTH_LONG)
-                    .show()
+                p0.toException().printStackTrace()
             }
         })
     }
@@ -510,10 +509,15 @@ fun Map(
     longitude: MutableDoubleState,
     selectFriend: MutableState<User?>
 ) {
+    val scope = rememberCoroutineScope()
     val scaffoldState = rememberBottomSheetScaffoldState()
     val context = locationHelper.context
 
     var isMapCentered by remember { mutableStateOf(false) }
+
+    val status = remember { mutableIntStateOf(0) }
+    val charge = remember { mutableIntStateOf(0) }
+    val temperature = remember { mutableFloatStateOf(0.0f) }
 
     val errorMessage = stringResource(R.string.no_applications_found)
 
@@ -567,6 +571,53 @@ fun Map(
         }
     }
 
+    DisposableEffect(selectFriend.value) {
+        if (selectFriend.value == null) return@DisposableEffect onDispose { }
+
+        val database = Firebase.database
+        val reference = database.getReference(selectFriend.value!!.uid)
+
+        val statusListener = object : ValueEventListener {
+            override fun onDataChange(p0: DataSnapshot) {
+                status.intValue = if (p0.exists()) "${p0.value}".toInt() else 0
+            }
+
+            override fun onCancelled(p0: DatabaseError) {
+                p0.toException().printStackTrace()
+            }
+        }
+
+        val chargeListener = object : ValueEventListener {
+            override fun onDataChange(p0: DataSnapshot) {
+                charge.intValue = if (p0.exists()) "${p0.value}".toInt() else 0
+            }
+
+            override fun onCancelled(p0: DatabaseError) {
+                p0.toException().printStackTrace()
+            }
+        }
+
+        val temperatureListener = object : ValueEventListener {
+            override fun onDataChange(p0: DataSnapshot) {
+                temperature.floatValue = if (p0.exists()) "${p0.value}".toFloat() else 0.0f
+            }
+
+            override fun onCancelled(p0: DatabaseError) {
+                p0.toException().printStackTrace()
+            }
+        }
+
+        reference.child("status").addValueEventListener(statusListener)
+        reference.child("battery/charge").addValueEventListener(chargeListener)
+        reference.child("battery/temperature").addValueEventListener(temperatureListener)
+
+        onDispose {
+            reference.child("status").removeEventListener(statusListener)
+            reference.child("battery/charge").removeEventListener(chargeListener)
+            reference.child("battery/temperature").removeEventListener(temperatureListener)
+        }
+    }
+
 
     LaunchedEffect(mapState) {
         snapshotFlow { mapState.cameraMoveReason }.collectLatest { reason ->
@@ -606,10 +657,28 @@ fun Map(
                     )
 
                     Text(
-                        text = if (friend.status == 1) stringResource(R.string.online) else stringResource(
+                        text = if (status.intValue == 1) stringResource(R.string.online) else stringResource(
                             R.string.offline
-                        ), color = if (friend.status == 1) Color.Green else Color.Gray
+                        ), color = if (status.intValue == 1) Color.Green else Color.Gray
                     )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row {
+                        Icon(
+                            painterResource(R.drawable.ic_charge),
+                            contentDescription = stringResource(R.string.charge)
+                        )
+                        Text("${if (charge.intValue != 0) charge.intValue else "--"}%")
+
+                        Spacer(Modifier.width(8.dp))
+
+                        Icon(
+                            painterResource(R.drawable.ic_temperature),
+                            contentDescription = stringResource(R.string.temperature)
+                        )
+                        Text("${if (temperature.floatValue != 0.0f) temperature.floatValue else "--.-"}°C")
+                    }
 
                     Spacer(Modifier.height(16.dp))
 
@@ -617,12 +686,18 @@ fun Map(
                         modifier = Modifier.fillMaxWidth(), onClick = {
                             try {
                                 val intent = Intent(
-                                    Intent.ACTION_VIEW, "geo:0,0?q=${friend.latitude},${friend.longitude}".toUri()
+                                    Intent.ACTION_VIEW,
+                                    "geo:0,0?q=${friend.latitude},${friend.longitude}".toUri()
                                 )
                                 context.startActivity(intent)
                             } catch (e: ActivityNotFoundException) {
                                 Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
                                 e.printStackTrace()
+                            } finally {
+                                scope.launch {
+                                    scaffoldState.bottomSheetState.partialExpand()
+                                    selectFriend.value = null
+                                }
                             }
                         }) {
                         Text(stringResource(R.string.build_a_route_to, friend.name))
@@ -850,14 +925,10 @@ fun User(
             .fillMaxWidth()
             .let {
                 if (user.isFriend) {
-                    it.combinedClickable(
-                        onClick = { onClick() },
-                        onLongClick = { onLongClick() }
-                    )
+                    it.combinedClickable(onClick = { onClick() }, onLongClick = { onLongClick() })
                 } else it
             }
-            .padding(16.dp), verticalAlignment = Alignment.CenterVertically
-    ) {
+            .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier.size(54.dp)
         ) {

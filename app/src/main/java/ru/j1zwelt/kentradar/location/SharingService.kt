@@ -6,12 +6,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.IBinder
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import com.google.firebase.Firebase
 import com.google.firebase.database.DatabaseReference
-import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.database
 import ru.j1zwelt.kentradar.R
 import ru.j1zwelt.kentradar.currentUser
@@ -21,8 +21,8 @@ class SharingService : Service() {
     private val channelId = "location_sharing_channel"
 
     private var locationHelper: LocationHelper? = null
+    private var batteryReceiver: BatteryReceiver? = null
 
-    private lateinit var database: FirebaseDatabase
     private lateinit var reference: DatabaseReference
 
     companion object {
@@ -32,14 +32,21 @@ class SharingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        locationHelper = LocationHelper(applicationContext)
-
-        database = Firebase.database
+        val database = Firebase.database
         reference = database.getReference(currentUser!!.uid)
+
+        locationHelper = LocationHelper(applicationContext)
+        batteryReceiver = BatteryReceiver { charge, temperature ->
+            reference.child("battery/charge").setValue(charge)
+            reference.child("battery/temperature").setValue(temperature)
+        }
     }
 
     @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
+        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+
         when (intent?.action) {
             ACTION_START -> {
                 sendNotificationAndStartForeground()
