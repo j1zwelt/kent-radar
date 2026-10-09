@@ -38,4 +38,6 @@
     <string name="no_applications_found">No applications found</string>
     <string name="temperature">Temperature</string>
     <string name="charge">Charge</string>
+    <string name="adding_a_tag_to_the_map">Adding a tag to the map</string>
+    <string name="enter_text">Enter text</string>
 </resources>

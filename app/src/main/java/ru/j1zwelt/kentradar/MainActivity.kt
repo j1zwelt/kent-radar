@@ -16,10 +16,14 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -80,7 +84,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableDoubleState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -103,6 +106,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -110,11 +114,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import androidx.core.graphics.withTranslation
 import androidx.core.net.toUri
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -127,12 +133,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 import org.maplibre.compose.camera.CameraAnimation
 import org.maplibre.compose.camera.CameraMoveReason
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.compose.camera.CameraUpdate
 import org.maplibre.compose.expressions.dsl.image
+import org.maplibre.compose.interaction.ClickEvent
 import org.maplibre.compose.interaction.ClickResult
+import org.maplibre.compose.interaction.MapInteractions
 import org.maplibre.compose.layers.SymbolLayer
 import org.maplibre.compose.map.MapState
 import org.maplibre.compose.map.MaplibreMap
@@ -140,8 +149,11 @@ import org.maplibre.compose.map.rememberMapState
 import org.maplibre.compose.sources.GeoJsonData
 import org.maplibre.compose.sources.rememberGeoJsonSource
 import org.maplibre.compose.style.BaseStyle
+import org.maplibre.spatialk.geojson.Feature
+import org.maplibre.spatialk.geojson.Geometry
 import org.maplibre.spatialk.geojson.Point
 import org.maplibre.spatialk.geojson.Position
+import ru.j1zwelt.kentradar.data.Tag
 import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.location.SharingService
@@ -220,10 +232,14 @@ fun KentRadarApp() {
     val context = LocalContext.current
     val locationHelper = LocationHelper(context)
 
+    val database = Firebase.database
+    val reference = database.getReference(currentUser!!.uid)
+
     val sPrefs = context.getSharedPreferences("sPrefs", MODE_PRIVATE)
 
     val friends = remember { mutableStateListOf<User>() }
     val selectFriend = remember { mutableStateOf<User?>(null) }
+    val selectTag = remember { mutableStateOf<Tag?>(null) }
     val sharingLocation = remember { mutableStateOf(sPrefs.getBoolean("sharingLocation", true)) }
 
     val locationManager =
@@ -232,8 +248,7 @@ fun KentRadarApp() {
         mutableStateOf(locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER))
     }
 
-    val latitude = remember { mutableDoubleStateOf(0.0) }
-    val longitude = remember { mutableDoubleStateOf(0.0) }
+    val position = remember { mutableStateOf<Position?>(null) }
 
     //Service
     if (currentUser != null) {
@@ -244,9 +259,8 @@ fun KentRadarApp() {
                 ) == PackageManager.PERMISSION_GRANTED
 
                 if (hasFinePermission) {
-                    locationHelper.addLocationUpdateListener { location ->
-                        latitude.doubleValue = location.latitude
-                        longitude.doubleValue = location.longitude
+                    locationHelper.addLocationUpdateListener {
+                        position.value = Position(it.longitude, it.latitude)
                     }
                 }
 
@@ -270,29 +284,15 @@ fun KentRadarApp() {
         "https://tiles.openfreemap.org/styles/liberty"
     }
     val mapState = rememberMapState(
-        baseStyle = BaseStyle.Uri(mapStyle), initialCameraPosition = CameraPosition(
-            target = Position(latitude = latitude.doubleValue, longitude = longitude.doubleValue),
-            zoom = 13.0
-        )
+        baseStyle = BaseStyle.Uri(mapStyle), initialCameraPosition = CameraPosition(zoom = 13.0)
     ) {
         //My marker
-        if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) {
-            val myPoint = Point(
-                coordinates = Position(
-                    longitude = longitude.doubleValue, latitude = latitude.doubleValue
-                )
-            )
-            val myGeoSource = rememberGeoJsonSource(
-                data = GeoJsonData.Features(myPoint)
-            )
+        if (position.value != null) {
+            val icon = if (isGpsActive.value) R.drawable.ic_my_map_location
+            else R.drawable.ic_my_map_location_search
 
-            val icon = painterResource(
-                if (isGpsActive.value) R.drawable.ic_my_map_location
-                else R.drawable.ic_my_map_location_search
-            )
-
-            SymbolLayer(
-                id = "my-live-location-layer", source = myGeoSource, iconImage = image(icon)
+            Marker(
+                "my-location", painterResource(icon), position.value!!
             )
         }
 
@@ -316,41 +316,59 @@ fun KentRadarApp() {
         val activeFriends =
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
         activeFriends.forEach { friend ->
-            key(friend.uid) {
-                val friendPoint = Point(
-                    coordinates = Position(longitude = friend.longitude, latitude = friend.latitude)
-                )
-
-                val friendSource = rememberGeoJsonSource(
-                    data = GeoJsonData.Features(friendPoint)
-                )
-
+            key(friend) {
                 val markerPainter = remember(friend.avatarBitmap) {
                     val currentAvatar = friend.avatarBitmap
-
-                    val finalBitmap = if (currentAvatar != null) {
-                        val nativeBitmap = currentAvatar.asAndroidBitmap()
-                        nativeBitmap.toCircleBitmap()
-                    } else defaultBitmapAvatar
+                    val finalBitmap =
+                        currentAvatar?.asAndroidBitmap()?.toCircleBitmap() ?: defaultBitmapAvatar
 
                     BitmapPainter(finalBitmap.asImageBitmap())
                 }
 
-                SymbolLayer(
-                    id = "layer-${friend.uid}",
-                    source = friendSource,
-                    iconImage = image(markerPainter),
-                    onClick = {
-                        selectFriend.value = friend
-                        ClickResult.Consume
-                    })
+                Marker(
+                    "marker-${friend.uid}",
+                    markerPainter,
+                    Position(friend.longitude, friend.latitude)
+                ) {
+                    selectFriend.value = friend
+                    ClickResult.Consume
+                }
+            }
+        }
+
+        //Tag markers
+        val tag = remember { mutableStateOf<Tag?>(null) }
+
+        reference.child("tag").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(p0: DataSnapshot) {
+                if (p0.exists() && p0.value != null) {
+                    val longitude = "${p0.child("longitude").value}".toDouble()
+                    val latitude = "${p0.child("latitude").value}".toDouble()
+                    val text = "${p0.child("text").value}"
+
+                    tag.value = Tag(text, Position(longitude, latitude))
+                } else tag.value = null
+            }
+
+            override fun onCancelled(p0: DatabaseError) {
+                p0.toException().printStackTrace()
+            }
+        })
+
+        key(tag.value) {
+            val currentTag = tag.value
+            if (currentTag != null) {
+                val tagPainter = BitmapPainter(currentTag.text.toTagBitmap())
+                Marker("tag", tagPainter, currentTag.position, 10.5f) {
+                    selectTag.value = currentTag
+                    ClickResult.Consume
+                }
             }
         }
     }
 
     //Friends
     val myFriendsPath = "${currentUser!!.uid}/friends"
-    val database = Firebase.database
     val myFriendsRef = database.getReference(myFriendsPath)
 
     LaunchedEffect(Unit) {
@@ -365,9 +383,7 @@ fun KentRadarApp() {
                         override fun onDataChange(p1: DataSnapshot) {
                             val checkFriendRef = myFriendsRef.child(userUid!!)
                             checkFriendRef.get().addOnSuccessListener { friendshipSnapshot ->
-                                if (!friendshipSnapshot.exists()) {
-                                    return@addOnSuccessListener
-                                }
+                                if (!friendshipSnapshot.exists()) return@addOnSuccessListener
 
                                 val userName = p1.child("userName").value.toString()
                                 val name = p1.child("name").value.toString()
@@ -451,9 +467,9 @@ fun KentRadarApp() {
                         mapState,
                         isGpsActive,
                         sharingLocation,
-                        latitude,
-                        longitude,
-                        selectFriend
+                        position,
+                        selectFriend,
+                        selectTag
                     )
                 }
 
@@ -477,6 +493,26 @@ fun KentRadarApp() {
             }
         }
     }
+}
+
+@Composable
+fun Marker(
+    id: String,
+    drawable: Painter,
+    coordinates: Position,
+    minZoom: Float = 0.0f,
+    onClick: (ClickEvent.(List<Feature<Geometry, JsonObject?>>) -> ClickResult)? = null
+) {
+    val point = Point(coordinates)
+    val geoSource = rememberGeoJsonSource(GeoJsonData.Features(point))
+
+    SymbolLayer(
+        id = id,
+        source = geoSource,
+        iconImage = image(drawable),
+        minZoom = minZoom,
+        onClick = onClick
+    )
 }
 
 enum class AppDestinations(
@@ -505,19 +541,27 @@ fun Map(
     mapState: MapState,
     isGpsActive: MutableState<Boolean>,
     sharingLocation: MutableState<Boolean>,
-    latitude: MutableDoubleState,
-    longitude: MutableDoubleState,
-    selectFriend: MutableState<User?>
+    position: MutableState<Position?>,
+    selectFriend: MutableState<User?>,
+    selectTag: MutableState<Tag?>
 ) {
     val scope = rememberCoroutineScope()
     val scaffoldState = rememberBottomSheetScaffoldState()
     val context = locationHelper.context
+
+    val database = Firebase.database
 
     var isMapCentered by remember { mutableStateOf(false) }
 
     val status = remember { mutableIntStateOf(0) }
     val charge = remember { mutableIntStateOf(0) }
     val temperature = remember { mutableFloatStateOf(0.0f) }
+
+    val tagLatitude = remember { mutableDoubleStateOf(0.0) }
+    val tagLongitude = remember { mutableDoubleStateOf(0.0) }
+    var showAddTagDialog by remember { mutableStateOf(false) }
+    var tagText by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
 
     val errorMessage = stringResource(R.string.no_applications_found)
 
@@ -539,16 +583,11 @@ fun Map(
         onDispose { context.unregisterReceiver(gpsReceiver) }
     }
 
-    LaunchedEffect(isMapCentered, latitude.doubleValue, longitude.doubleValue) {
+    LaunchedEffect(isMapCentered, position.value) {
         if (isMapCentered) {
-            val position = Position(
-                latitude = latitude.doubleValue, longitude = longitude.doubleValue
-            )
-            mapState.animateCamera(
-                update = CameraUpdate(
-                    target = position, zoom = 13.0
-                ), animation = CameraAnimation.Fly(duration = 3.seconds)
-            )
+            if (position.value != null) {
+                mapState.animateCamera(position.value!!)
+            }
         }
     }
 
@@ -556,16 +595,16 @@ fun Map(
         val currentFriend = selectFriend.value
         if (currentFriend != null) {
             scaffoldState.bottomSheetState.expand()
+            mapState.animateCamera(Position(currentFriend.longitude, currentFriend.latitude))
 
-            val position = Position(
-                latitude = currentFriend.latitude, longitude = currentFriend.longitude
-            )
+            isMapCentered = false
+        }
+    }
 
-            mapState.animateCamera(
-                update = CameraUpdate(
-                    target = position, zoom = 13.0
-                ), animation = CameraAnimation.Fly(duration = 3.seconds)
-            )
+    LaunchedEffect(selectTag.value) {
+        val currentTag = selectTag.value
+        if (currentTag != null) {
+            mapState.animateCamera(currentTag.position, 14.0)
 
             isMapCentered = false
         }
@@ -574,7 +613,6 @@ fun Map(
     DisposableEffect(selectFriend.value) {
         if (selectFriend.value == null) return@DisposableEffect onDispose { }
 
-        val database = Firebase.database
         val reference = database.getReference(selectFriend.value!!.uid)
 
         val statusListener = object : ValueEventListener {
@@ -623,6 +661,7 @@ fun Map(
             if (reason == CameraMoveReason.GESTURE) {
                 isMapCentered = false
                 selectFriend.value = null
+                selectTag.value = null
                 scaffoldState.bottomSheetState.partialExpand()
             }
         }
@@ -631,6 +670,7 @@ fun Map(
     LaunchedEffect(key1 = scaffoldState.bottomSheetState.targetValue) {
         if (scaffoldState.bottomSheetState.targetValue == SheetValue.PartiallyExpanded) {
             selectFriend.value = null
+            selectTag.value = null
         }
     }
 
@@ -706,7 +746,24 @@ fun Map(
             }
         }) {
         Box(modifier = modifier.fillMaxSize()) {
-            MaplibreMap(state = mapState)
+            MaplibreMap(
+                modifier = Modifier.fillMaxSize(),
+                state = mapState,
+                interactions = MapInteractions {
+                    callbacks {
+                        longClick {
+                            onEvent { event ->
+                                val position = event.position!!
+                                tagLatitude.doubleValue = position.latitude
+                                tagLongitude.doubleValue = position.longitude
+
+                                showAddTagDialog = true
+
+                                ClickResult.Consume
+                            }
+                        }
+                    }
+                })
 
             Switch(
                 modifier = Modifier
@@ -728,14 +785,72 @@ fun Map(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp), onClick = {
-                    if (latitude.doubleValue != 0.0 && longitude.doubleValue != 0.0) isMapCentered =
-                        true
+                    if (position.value != null) isMapCentered = true
                 }) {
                 Icon(
                     painter = if (isMapCentered) painterResource(id = R.drawable.ic_my_location)
                     else painterResource(id = R.drawable.ic_my_location_search),
                     contentDescription = stringResource(R.string.my_location),
                 )
+            }
+
+            if (showAddTagDialog) {
+                val maxCharLimit = 30
+
+                AlertDialog(onDismissRequest = { showAddTagDialog = false }, title = {
+                    Text(text = stringResource(R.string.adding_a_tag_to_the_map))
+                }, text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = tagText,
+                            onValueChange = { tagText = it },
+                            label = { Text(stringResource(R.string.enter_text)) },
+                            isError = isError,
+                            supportingText = {
+                                Text(
+                                    text = "${tagText.length}/$maxCharLimit",
+                                    textAlign = TextAlign.End,
+                                    color = if (tagText.length > maxCharLimit) {
+                                        isError = true
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        isError = false
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }, confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (tagText != "" && tagText.length < maxCharLimit) {
+                                val tagData = mapOf(
+                                    "longitude" to tagLongitude.doubleValue,
+                                    "latitude" to tagLatitude.doubleValue,
+                                    "text" to tagText
+                                )
+
+                                database.getReference(currentUser!!.uid).child("tag")
+                                    .setValue(tagData)
+
+                                showAddTagDialog = false
+                                tagText = ""
+                            }
+                        }) {
+                        Text(stringResource(R.string.send))
+                    }
+                }, dismissButton = {
+                    TextButton(onClick = {
+                        showAddTagDialog = false
+                        tagText = ""
+                    }) { Text(stringResource(R.string.cancel)) }
+                })
             }
         }
     }
@@ -757,6 +872,8 @@ fun Friends(
         val snackBarHostState = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
 
+        val database = Firebase.database
+
         var userName by remember { mutableStateOf("") }
 
         LazyColumn {
@@ -767,7 +884,6 @@ fun Friends(
                 }, onLongClick = {
                     removableFriend = user
                 }, onAcceptClick = {
-                    val database = Firebase.database
                     val myRef = database.getReference("${currentUser!!.uid}/friends/${user.uid}")
                         .setValue(true)
 
@@ -784,7 +900,6 @@ fun Friends(
                         }
                     }
                 }, onDismissClick = {
-                    val database = Firebase.database
                     val reference =
                         database.getReference("${currentUser!!.uid}/friends/${user.uid}")
                             .removeValue()
@@ -840,7 +955,6 @@ fun Friends(
                         val editUserName = userName.replace("@", "").trim()
 
                         if (!(friends.any { it.userName == editUserName })) {
-                            val database = Firebase.database
                             val searchRef = database.getReference("users/$editUserName/uid").get()
 
                             searchRef.addOnSuccessListener {
@@ -882,7 +996,6 @@ fun Friends(
             }, confirmButton = {
                 TextButton(
                     onClick = {
-                        val database = Firebase.database
                         val myRef =
                             database.getReference("${currentUser!!.uid}/friends/${removableFriend!!.uid}")
                         val userRef =
@@ -1267,6 +1380,9 @@ fun Register(modifier: Modifier = Modifier) {
     val snackBarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    val database = Firebase.database
+    val auth = Firebase.auth
+
     val errorMessage = stringResource(R.string.unknown_error)
     val errorMessage2 = stringResource(R.string.passwords_do_not_match)
     val errorMessage3 = stringResource(R.string.this_username_is_already_taken_by_another_user)
@@ -1367,9 +1483,6 @@ fun Register(modifier: Modifier = Modifier) {
                     if (password1 == password2) {
                         val newUserName = userName.replace("@", "").trim()
 
-                        val database = Firebase.database
-                        val auth = Firebase.auth
-
                         val checkUserName = database.getReference("users/$newUserName").get()
                         checkUserName.addOnSuccessListener { checkSnap ->
                             if (checkSnap.value == null) {
@@ -1378,11 +1491,9 @@ fun Register(modifier: Modifier = Modifier) {
                                 createUser.addOnSuccessListener {
                                     currentUser = it.user
                                     val uid = currentUser!!.uid
-                                    val reference = database.getReference(uid)
-                                    val uidRef = database.getReference("users/$newUserName/uid")
-                                    reference.child("userName").setValue(newUserName)
-                                    reference.child("name").setValue(name)
-                                    uidRef.setValue(uid)
+                                    val userInfo = mapOf("userName" to newUserName, "name" to name)
+                                    database.getReference(uid).setValue(userInfo)
+                                    database.getReference("users/$newUserName/uid").setValue(uid)
                                 }
 
                                 createUser.addOnFailureListener {
@@ -1572,4 +1683,49 @@ fun String.decodeBase64Image(): ImageBitmap? {
         e.printStackTrace()
         null
     }
+}
+
+fun String.toTagBitmap(): ImageBitmap {
+    val paddingHorizontal = 24f
+    val paddingVertical = 16f
+    val interval = 0.7f
+    val cornerRadius = 20f
+    val maxAllowedWidth = 250
+
+    val textPaint = TextPaint().apply {
+        textSize = 40f
+        isAntiAlias = true
+    }
+
+    val bgPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        isAntiAlias = true
+    }
+
+    val rawTextWidth = textPaint.measureText(this)
+    val textWidth = if (rawTextWidth > maxAllowedWidth) maxAllowedWidth else rawTextWidth.toInt()
+
+    val staticLayout = StaticLayout.Builder.obtain(this, 0, this.length, textPaint, textWidth)
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, interval)
+        .setIncludePad(false).build()
+
+    val bitmapWidth = (staticLayout.width + paddingHorizontal * 2).toInt()
+    val bitmapHeight = (staticLayout.height + paddingVertical * 2).toInt()
+
+    val rect = RectF(0f, 0f, bitmapWidth.toFloat(), bitmapHeight.toFloat())
+
+    val bitmap = createBitmap(bitmapWidth, bitmapHeight)
+    val canvas = Canvas(bitmap)
+    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, bgPaint)
+    canvas.withTranslation(paddingHorizontal, paddingVertical) {
+        staticLayout.draw(this)
+    }
+
+    return bitmap.asImageBitmap()
+}
+
+suspend fun MapState.animateCamera(position: Position, zoom: Double = 13.0) {
+    this.animateCamera(
+        CameraUpdate(position, zoom), CameraAnimation.Fly(duration = 3.seconds)
+    )
 }
