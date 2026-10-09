@@ -160,6 +160,7 @@ import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.location.SharingService
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 import java.io.ByteArrayOutputStream
+import kotlin.math.ceil
 import kotlin.time.Duration.Companion.seconds
 
 var currentUser by mutableStateOf(Firebase.auth.currentUser)
@@ -780,8 +781,8 @@ fun Map(
                 thumbContent = if (sharingLocation.value) {
                     {
                         Icon(
-                            painterResource(R.drawable.ic_sharing_location),
-                            contentDescription = null,
+                            painterResource(R.drawable.ic_broadcast_location),
+                            contentDescription = context.getString(R.string.broadcast_location),
                             modifier = Modifier.size(SwitchDefaults.IconSize),
                         )
                     }
@@ -932,7 +933,7 @@ fun Friends(
             }) {
             Icon(
                 painter = painterResource(id = R.drawable.ic_add),
-                contentDescription = "Добавить кента"
+                contentDescription = stringResource(R.string.add_friend)
             )
         }
 
@@ -1092,7 +1093,7 @@ fun User(
                 IconButton(onClick = onDismissClick) {
                     Icon(
                         painterResource(R.drawable.ic_close),
-                        contentDescription = "Отклонить",
+                        contentDescription = stringResource(R.string.reject),
                         tint = MaterialTheme.colorScheme.error
                     )
                 }
@@ -1104,7 +1105,7 @@ fun User(
                 ) {
                     Icon(
                         painterResource(R.drawable.ic_check),
-                        contentDescription = "Принять",
+                        contentDescription = stringResource(R.string.accept),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
@@ -1710,21 +1711,32 @@ fun String.toTagBitmap(): ImageBitmap {
         isAntiAlias = true
     }
 
-    val rawTextWidth = textPaint.measureText(this)
-    val textWidth = if (rawTextWidth > maxAllowedWidth) maxAllowedWidth else rawTextWidth.toInt()
+    val staticLayout = StaticLayout.Builder.obtain(this, 0, this.length, textPaint, maxAllowedWidth)
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setLineSpacing(0f, interval)
+        .setIncludePad(false)
+        .build()
 
-    val staticLayout = StaticLayout.Builder.obtain(this, 0, this.length, textPaint, textWidth)
-        .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, interval)
-        .setIncludePad(false).build()
+    var maxLineWidth = 0f
+    for (i in 0 until staticLayout.lineCount) {
+        val lineWidth = staticLayout.getLineWidth(i)
+        if (lineWidth > maxLineWidth) {
+            maxLineWidth = lineWidth
+        }
+    }
 
-    val bitmapWidth = (staticLayout.width + paddingHorizontal * 2).toInt()
-    val bitmapHeight = (staticLayout.height + paddingVertical * 2).toInt()
+    val finalWidth = ceil(maxLineWidth.toDouble()).toInt()
+    val finalHeight = staticLayout.height
+
+    val bitmapWidth = (finalWidth + paddingHorizontal * 2).toInt()
+    val bitmapHeight = (finalHeight + paddingVertical * 2).toInt()
 
     val rect = RectF(0f, 0f, bitmapWidth.toFloat(), bitmapHeight.toFloat())
 
     val bitmap = createBitmap(bitmapWidth, bitmapHeight)
     val canvas = Canvas(bitmap)
     canvas.drawRoundRect(rect, cornerRadius, cornerRadius, bgPaint)
+
     canvas.withTranslation(paddingHorizontal, paddingVertical) {
         staticLayout.draw(this)
     }

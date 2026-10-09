@@ -40,4 +40,8 @@
     <string name="charge">Charge</string>
     <string name="adding_a_tag_to_the_map">Adding a tag to the map</string>
     <string name="enter_text">Enter text</string>
+    <string name="broadcast_location">Broadcast location</string>
+    <string name="add_friend">Add friend</string>
+    <string name="reject">Reject</string>
+    <string name="accept">Accept</string>
 </resources>
