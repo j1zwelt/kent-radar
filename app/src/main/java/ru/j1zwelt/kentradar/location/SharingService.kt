@@ -37,8 +37,8 @@ class SharingService : Service() {
 
         locationHelper = LocationHelper(applicationContext)
         batteryReceiver = BatteryReceiver { charge, temperature ->
-            reference.child("battery/charge").setValue(charge)
-            reference.child("battery/temperature").setValue(temperature)
+            reference.child("charge").setValue(charge)
+            reference.child("temperature").setValue(temperature)
         }
     }
 

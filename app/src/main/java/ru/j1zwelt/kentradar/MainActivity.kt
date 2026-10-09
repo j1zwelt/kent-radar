@@ -88,8 +88,6 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -154,10 +152,13 @@ import org.maplibre.spatialk.geojson.Feature
 import org.maplibre.spatialk.geojson.Geometry
 import org.maplibre.spatialk.geojson.Point
 import org.maplibre.spatialk.geojson.Position
-import ru.j1zwelt.kentradar.data.Tag
-import ru.j1zwelt.kentradar.data.User
 import ru.j1zwelt.kentradar.location.LocationHelper
 import ru.j1zwelt.kentradar.location.SharingService
+import ru.j1zwelt.kentradar.model.Tag
+import ru.j1zwelt.kentradar.model.User
+import ru.j1zwelt.kentradar.model.data.FriendData
+import ru.j1zwelt.kentradar.model.data.ProfileData
+import ru.j1zwelt.kentradar.model.data.UserData
 import ru.j1zwelt.kentradar.ui.theme.KentRadarTheme
 import java.io.ByteArrayOutputStream
 import kotlin.math.ceil
@@ -315,8 +316,7 @@ fun KentRadarApp() {
             output.toCircleBitmap()
         }
 
-        val myFriends =
-            friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
+        val myFriends = friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
         myFriends.forEach { friend ->
             key(friend) {
                 val markerPainter = remember(friend.avatarBitmap) {
@@ -336,7 +336,9 @@ fun KentRadarApp() {
                     ClickResult.Consume
                 }
 
-                TagMarker("tag-${friend.uid}", database.getReference("${friend.uid}/tag"), selectTag)
+                TagMarker(
+                    "tag-${friend.uid}", database.getReference("${friend.uid}/tag"), selectTag
+                )
             }
         }
 
@@ -352,46 +354,38 @@ fun KentRadarApp() {
         myFriendsRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(p0: DataSnapshot) {
                 if (p0.exists()) for (child in p0.children) {
-                    val userUid = child.key
-                    val isFriend = child.value
-                    val userRef = database.getReference("$userUid")
+                    val uid = child.key
+                    val isFriend = "${child.value}".toBoolean()
+                    val userRef = database.getReference("$uid")
 
                     userRef.addValueEventListener(object : ValueEventListener {
                         override fun onDataChange(p1: DataSnapshot) {
-                            val checkFriendRef = myFriendsRef.child(userUid!!)
-                            checkFriendRef.get().addOnSuccessListener { friendshipSnapshot ->
-                                if (!friendshipSnapshot.exists()) return@addOnSuccessListener
+                            val checkFriendRef = myFriendsRef.child(uid!!)
+                            checkFriendRef.get().addOnSuccessListener { dataSnapshot ->
+                                if (!dataSnapshot.exists()) return@addOnSuccessListener
 
-                                val userName = p1.child("userName").value.toString()
-                                val name = p1.child("name").value.toString()
-                                val avatarBase64 = p1.child("avatar").value.toString()
-                                val status = p1.child("status").value.toString().toInt()
-                                val latitude = p1.child("latitude").value.toString().toDouble()
-                                val longitude = p1.child("longitude").value.toString().toDouble()
+                                val userData = p1.getValue(UserData::class.java)
 
-                                val user = User(
-                                    userUid,
-                                    userName,
-                                    name,
-                                    status,
-                                    latitude,
-                                    longitude,
-                                    isFriend.toString().toBoolean()
-                                )
+                                val user = userData?.toUser()
+                                if (user != null) {
+                                    user.uid = uid
+                                    user.isFriend = isFriend
 
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    if (avatarBase64.isNotEmpty()) {
-                                        val avatarBitmap = avatarBase64.decodeBase64Image()
-                                        user.avatarBitmap = avatarBitmap
-                                    }
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        if (userData.avatar.isNotEmpty()) {
+                                            val avatarBitmap =
+                                                userData.avatar.decodeAndToImageBitmap()
+                                            user.avatarBitmap = avatarBitmap
+                                        }
 
-                                    withContext(Dispatchers.Main) {
-                                        val existingIndex =
-                                            friends.indexOfFirst { it.uid == user.uid }
-                                        if (existingIndex != -1) {
-                                            friends[existingIndex] = user
-                                        } else {
-                                            friends.add(user)
+                                        withContext(Dispatchers.Main) {
+                                            val existingIndex =
+                                                friends.indexOfFirst { it.uid == user.uid }
+                                            if (existingIndex != -1) {
+                                                friends[existingIndex] = user
+                                            } else {
+                                                friends.add(user)
+                                            }
                                         }
                                     }
                                 }
@@ -412,13 +406,25 @@ fun KentRadarApp() {
     }
 
     //Profile
-    val loadingStr = stringResource(R.string.loading)
-    val userName = remember { mutableStateOf(loadingStr) }
-    val oldUserName = remember { mutableStateOf("") }
-    val name = remember { mutableStateOf(loadingStr) }
-    val oldName = remember { mutableStateOf("") }
-    val avatar = remember { mutableStateOf<ImageBitmap?>(null) }
-    val oldAvatar = remember { mutableStateOf<ImageBitmap?>(null) }
+    val profileData = remember { mutableStateOf(ProfileData()) }
+    val userName = remember { mutableStateOf("") }
+    val name = remember { mutableStateOf("") }
+    val avatarBitmap = remember { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(Unit) {
+        myReference.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(p0: DataSnapshot) {
+                profileData.value = p0.getValue(ProfileData::class.java)!!
+                userName.value = profileData.value.userName
+                name.value = profileData.value.name
+                avatarBitmap.value = profileData.value.avatar.decodeAndToImageBitmap()
+            }
+
+            override fun onCancelled(p0: DatabaseError) {
+                p0.toException().printStackTrace()
+            }
+        })
+    }
 
     //Main UI
     NavigationSuiteScaffold(
@@ -459,12 +465,10 @@ fun KentRadarApp() {
                 AppDestinations.PROFILE -> {
                     Profile(
                         modifier = Modifier.padding(innerPadding),
+                        profileData,
                         userName,
-                        oldUserName,
                         name,
-                        oldName,
-                        avatar,
-                        oldAvatar
+                        avatarBitmap
                     )
                 }
             }
@@ -498,13 +502,8 @@ fun TagMarker(id: String, reference: DatabaseReference, selectTag: MutableState<
 
     reference.addValueEventListener(object : ValueEventListener {
         override fun onDataChange(p0: DataSnapshot) {
-            if (p0.exists() && p0.value != null) {
-                val longitude = "${p0.child("longitude").value}".toDouble()
-                val latitude = "${p0.child("latitude").value}".toDouble()
-                val text = "${p0.child("text").value}"
-
-                tag.value = Tag(text, Position(longitude, latitude))
-            } else tag.value = null
+            if (p0.exists()) tag.value = p0.getValue(Tag::class.java)
+            else tag.value = null
         }
 
         override fun onCancelled(p0: DatabaseError) {
@@ -516,7 +515,7 @@ fun TagMarker(id: String, reference: DatabaseReference, selectTag: MutableState<
         val currentTag = tag.value
         if (currentTag != null) {
             val tagPainter = BitmapPainter(currentTag.text.toTagBitmap())
-            Marker(id, tagPainter, currentTag.position, 10.5f) {
+            Marker(id, tagPainter, Position(currentTag.longitude, currentTag.latitude), 10.5f) {
                 selectTag.value = currentTag
                 ClickResult.Consume
             }
@@ -562,9 +561,7 @@ fun Map(
 
     var isMapCentered by remember { mutableStateOf(false) }
 
-    val status = remember { mutableIntStateOf(0) }
-    val charge = remember { mutableIntStateOf(0) }
-    val temperature = remember { mutableFloatStateOf(0.0f) }
+    val friendData = remember { mutableStateOf<FriendData?>(null) }
 
     val tagLatitude = remember { mutableDoubleStateOf(0.0) }
     val tagLongitude = remember { mutableDoubleStateOf(0.0) }
@@ -604,8 +601,9 @@ fun Map(
         val currentFriend = selectFriend.value
         if (currentFriend != null) {
             scaffoldState.bottomSheetState.expand()
-            mapState.animateCamera(Position(currentFriend.longitude, currentFriend.latitude))
 
+            val position = Position(currentFriend.longitude, currentFriend.latitude)
+            mapState.animateCamera(position)
             isMapCentered = false
         }
     }
@@ -613,55 +611,30 @@ fun Map(
     LaunchedEffect(selectTag.value) {
         val currentTag = selectTag.value
         if (currentTag != null) {
-            mapState.animateCamera(currentTag.position, 14.0)
+            val position = Position(currentTag.longitude, currentTag.latitude)
+            mapState.animateCamera(position, 14.0)
 
             isMapCentered = false
         }
     }
 
     DisposableEffect(selectFriend.value) {
-        if (selectFriend.value == null) return@DisposableEffect onDispose { }
+        val currentFriend = selectFriend.value ?: return@DisposableEffect onDispose { }
 
-        val reference = database.getReference(selectFriend.value!!.uid)
-
-        val statusListener = object : ValueEventListener {
+        val reference = database.getReference(currentFriend.uid)
+        val listener = object : ValueEventListener {
             override fun onDataChange(p0: DataSnapshot) {
-                status.intValue = if (p0.exists()) "${p0.value}".toInt() else 0
+                friendData.value = p0.getValue(FriendData::class.java)
             }
 
             override fun onCancelled(p0: DatabaseError) {
                 p0.toException().printStackTrace()
             }
         }
-
-        val chargeListener = object : ValueEventListener {
-            override fun onDataChange(p0: DataSnapshot) {
-                charge.intValue = if (p0.exists()) "${p0.value}".toInt() else 0
-            }
-
-            override fun onCancelled(p0: DatabaseError) {
-                p0.toException().printStackTrace()
-            }
-        }
-
-        val temperatureListener = object : ValueEventListener {
-            override fun onDataChange(p0: DataSnapshot) {
-                temperature.floatValue = if (p0.exists()) "${p0.value}".toFloat() else 0.0f
-            }
-
-            override fun onCancelled(p0: DatabaseError) {
-                p0.toException().printStackTrace()
-            }
-        }
-
-        reference.child("status").addValueEventListener(statusListener)
-        reference.child("battery/charge").addValueEventListener(chargeListener)
-        reference.child("battery/temperature").addValueEventListener(temperatureListener)
+        reference.addValueEventListener(listener)
 
         onDispose {
-            reference.child("status").removeEventListener(statusListener)
-            reference.child("battery/charge").removeEventListener(chargeListener)
-            reference.child("battery/temperature").removeEventListener(temperatureListener)
+            reference.removeEventListener(listener)
         }
     }
 
@@ -670,6 +643,7 @@ fun Map(
             if (reason == CameraMoveReason.GESTURE) {
                 isMapCentered = false
                 selectFriend.value = null
+                friendData.value = null
                 selectTag.value = null
                 scaffoldState.bottomSheetState.partialExpand()
             }
@@ -679,6 +653,7 @@ fun Map(
     LaunchedEffect(key1 = scaffoldState.bottomSheetState.targetValue) {
         if (scaffoldState.bottomSheetState.targetValue == SheetValue.PartiallyExpanded) {
             selectFriend.value = null
+            friendData.value = null
             selectTag.value = null
         }
     }
@@ -690,6 +665,7 @@ fun Map(
         sheetDragHandle = { BottomSheetDefaults.DragHandle() },
         sheetContent = {
             val friend = selectFriend.value
+            val info = friendData.value
 
             Column(
                 modifier = Modifier
@@ -698,16 +674,16 @@ fun Map(
                     .padding(horizontal = 24.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (friend != null) {
+                if (friend != null && info != null) {
                     Text(
                         text = friend.name,
                         style = MaterialTheme.typography.headlineMedium,
                     )
 
                     Text(
-                        text = if (status.intValue == 1) stringResource(R.string.online) else stringResource(
+                        text = if (info.status == 1) stringResource(R.string.online) else stringResource(
                             R.string.offline
-                        ), color = if (status.intValue == 1) Color.Green else Color.Gray
+                        ), color = if (info.status == 1) Color.Green else Color.Gray
                     )
 
                     Spacer(Modifier.height(8.dp))
@@ -717,7 +693,7 @@ fun Map(
                             painterResource(R.drawable.ic_charge),
                             contentDescription = stringResource(R.string.charge)
                         )
-                        Text("${if (charge.intValue != 0) charge.intValue else "--"}%")
+                        Text("${if (info.charge != 0) info.charge else "--"}%")
 
                         Spacer(Modifier.width(8.dp))
 
@@ -725,7 +701,7 @@ fun Map(
                             painterResource(R.drawable.ic_temperature),
                             contentDescription = stringResource(R.string.temperature)
                         )
-                        Text("${if (temperature.floatValue != 0.0f) temperature.floatValue else "--.-"}°C")
+                        Text("${if (info.temperature != 0.0f) info.temperature else "--.-"}°C")
                     }
 
                     Spacer(Modifier.height(16.dp))
@@ -962,17 +938,12 @@ fun Friends(
                 TextButton(
                     onClick = {
                         val editUserName = userName.replace("@", "").trim()
-
                         if (!(friends.any { it.userName == editUserName })) {
                             val searchRef = database.getReference("users/$editUserName/uid").get()
-
                             searchRef.addOnSuccessListener {
                                 if (it.exists()) {
-                                    val friendUid = it.value.toString()
-                                    val friendRef =
-                                        database.getReference("$friendUid/friends/${currentUser!!.uid}")
-                                    friendRef.setValue(false)
-
+                                    database.getReference("${it.value}/friends/${currentUser!!.uid}")
+                                        .setValue(false)
                                     showSendDialog = false
                                 } else isNullUser = true
                             }
@@ -1117,16 +1088,12 @@ fun User(
 @Composable
 fun Profile(
     modifier: Modifier = Modifier,
+    profileData: MutableState<ProfileData>,
     userName: MutableState<String>,
-    oldUserName: MutableState<String>,
     name: MutableState<String>,
-    oldName: MutableState<String>,
-    avatar: MutableState<ImageBitmap?>,
-    oldAvatar: MutableState<ImageBitmap?>
+    avatarBitmap: MutableState<ImageBitmap?>
 ) {
     val context = LocalContext.current
-
-    val scope = rememberCoroutineScope()
 
     val sheetState = rememberModalBottomSheetState(true)
     var isSheetOpen by remember { mutableStateOf(false) }
@@ -1135,59 +1102,32 @@ fun Profile(
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(), onResult = {
-            if (it != null) {
-                selectedImageUri = it
-            }
-        })
+        ActivityResultContracts.PickVisualMedia()
+    ) { if (it != null) selectedImageUri = it }
 
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview(), onResult = {
-            if (it != null) {
-                avatar.value = it.asImageBitmap()
-                selectedImageUri = null
-            }
-        })
-
-    val loadingStr = stringResource(R.string.loading)
-    val errorMessage = stringResource(R.string.unknown_error)
+        ActivityResultContracts.TakePicturePreview()
+    ) {
+        if (it != null) {
+            avatarBitmap.value = it.asImageBitmap()
+            selectedImageUri = null
+        }
+    }
 
     var userNameIsTaken by remember { mutableStateOf(false) }
 
     val database = Firebase.database
     val reference = database.getReference(currentUser!!.uid)
 
-    LaunchedEffect(key1 = Unit) {
-        reference.get().addOnSuccessListener {
-            if (it.exists()) {
-                if (userName.value == loadingStr) userName.value =
-                    it.child("userName").value.toString()
-                if (oldUserName.value == "") oldUserName.value = userName.value
-                if (name.value == loadingStr) name.value = it.child("name").value.toString()
-                if (oldName.value == "") oldName.value = name.value
-            }
-        }
-    }
-
     LaunchedEffect(selectedImageUri) {
         if (selectedImageUri != null) {
             try {
-                context.contentResolver.openInputStream(selectedImageUri!!).use { inputStream ->
-                    avatar.value = BitmapFactory.decodeStream(inputStream)?.asImageBitmap()
+                context.contentResolver.openInputStream(selectedImageUri!!).use {
+                    avatarBitmap.value = BitmapFactory.decodeStream(it)?.asImageBitmap()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        }
-    }
-
-    if (oldAvatar.value == null) {
-        reference.child("avatar").get().addOnSuccessListener {
-            val avatarBase64 = it.value.toString()
-            val avatarBitmap = avatarBase64.decodeBase64Image()
-
-            avatar.value = avatarBitmap
-            oldAvatar.value = avatarBitmap
         }
     }
 
@@ -1202,7 +1142,7 @@ fun Profile(
             Spacer(Modifier.height(48.dp))
 
             Image(
-                painter = avatar.value?.let { BitmapPainter(it) }
+                painter = avatarBitmap.value?.let { BitmapPainter(it) }
                     ?: painterResource(id = R.drawable.ic_account_box),
                 contentDescription = stringResource(id = R.string.my_photo),
                 modifier = Modifier
@@ -1251,58 +1191,27 @@ fun Profile(
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
-                    if (userName.value != oldUserName.value) {
-                        val newUserName = userName.value.replace("@", "").trim()
+                    val newProfileData = ProfileData(
+                        userName.value,
+                        name.value
+                    )
 
-                        val usersRef = database.getReference("users")
-                        val newUserNameRef = usersRef.child(newUserName).get()
-                        val oldUserNameRef = usersRef.child(oldUserName.value)
-
-                        newUserNameRef.addOnSuccessListener { checkSnap ->
-                            if (checkSnap.value == null) {
-                                reference.child("userName").setValue(newUserName)
-                                oldUserNameRef.removeValue()
-                                checkSnap.ref.setValue(currentUser!!.uid)
-
-                                oldUserName.value = userName.value
-                                userNameIsTaken = false
-                            } else userNameIsTaken = true
-                        }
-
-                        newUserNameRef.addOnFailureListener {
-                            scope.launch {
-                                snackBarHostState.showSnackbar(
-                                    it.localizedMessage ?: errorMessage
-                                )
-                            }
-                        }
-                    }
-
-                    if (name.value != oldName.value) {
-                        reference.child("name").setValue(name.value)
-                        oldName.value = name.value
-                    }
-
-                    if (avatar.value != oldAvatar.value) {
-                        val androidBitmap = avatar.value!!.asAndroidBitmap()
+                    if (avatarBitmap.value != null) {
+                        val androidBitmap = avatarBitmap.value!!.asAndroidBitmap()
                         val byteArrayOutputStream = ByteArrayOutputStream()
-
                         val scaledBitmap = androidBitmap.scale(160, 160)
                         scaledBitmap.compress(
                             Bitmap.CompressFormat.JPEG, 75, byteArrayOutputStream
                         )
+                        val base64String =
+                            Base64.encodeToString(byteArrayOutputStream.toByteArray(), Base64.DEFAULT)
 
-                        val byteArray = byteArrayOutputStream.toByteArray()
-
-                        val base64String = Base64.encodeToString(byteArray, Base64.DEFAULT)
-                        val finalBase64Data = "$base64String"
-
-                        reference.child("avatar").setValue(finalBase64Data)
-
-                        oldAvatar.value = avatar.value
+                       newProfileData.avatar = base64String
                     }
-                },
-                enabled = userName.value != loadingStr && name.value != loadingStr && (userName.value != oldUserName.value || name.value != oldName.value || avatar.value != oldAvatar.value)
+
+                    profileData.value = newProfileData
+                    reference.updateChildren(newProfileData.toMap())
+                }
             ) {
                 Text(stringResource(R.string.save_changes))
             }
@@ -1683,7 +1592,7 @@ private fun Bitmap.toCircleBitmap(
     return output
 }
 
-fun String.decodeBase64Image(): ImageBitmap? {
+fun String?.decodeAndToImageBitmap(): ImageBitmap? {
     return try {
         val imageBytes = Base64.decode(this, Base64.DEFAULT)
         val decodedBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
@@ -1702,7 +1611,7 @@ fun String.toTagBitmap(): ImageBitmap {
     val maxAllowedWidth = 250
 
     val textPaint = TextPaint().apply {
-        textSize = 40f
+        textSize = 32f
         isAntiAlias = true
     }
 
@@ -1712,10 +1621,8 @@ fun String.toTagBitmap(): ImageBitmap {
     }
 
     val staticLayout = StaticLayout.Builder.obtain(this, 0, this.length, textPaint, maxAllowedWidth)
-        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-        .setLineSpacing(0f, interval)
-        .setIncludePad(false)
-        .build()
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, interval)
+        .setIncludePad(false).build()
 
     var maxLineWidth = 0f
     for (i in 0 until staticLayout.lineCount) {
