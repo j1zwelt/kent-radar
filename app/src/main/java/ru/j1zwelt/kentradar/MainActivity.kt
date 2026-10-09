@@ -126,6 +126,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.database
 import kotlinx.coroutines.CoroutineScope
@@ -233,7 +234,7 @@ fun KentRadarApp() {
     val locationHelper = LocationHelper(context)
 
     val database = Firebase.database
-    val reference = database.getReference(currentUser!!.uid)
+    val myReference = database.getReference(currentUser!!.uid)
 
     val sPrefs = context.getSharedPreferences("sPrefs", MODE_PRIVATE)
 
@@ -313,9 +314,9 @@ fun KentRadarApp() {
             output.toCircleBitmap()
         }
 
-        val activeFriends =
+        val myFriends =
             friends.filter { it.isFriend && it.latitude != 0.0 && it.longitude != 0.0 }
-        activeFriends.forEach { friend ->
+        myFriends.forEach { friend ->
             key(friend) {
                 val markerPainter = remember(friend.avatarBitmap) {
                     val currentAvatar = friend.avatarBitmap
@@ -333,38 +334,13 @@ fun KentRadarApp() {
                     selectFriend.value = friend
                     ClickResult.Consume
                 }
+
+                TagMarker("tag-${friend.uid}", database.getReference("${friend.uid}/tag"), selectTag)
             }
         }
 
-        //Tag markers
-        val tag = remember { mutableStateOf<Tag?>(null) }
-
-        reference.child("tag").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(p0: DataSnapshot) {
-                if (p0.exists() && p0.value != null) {
-                    val longitude = "${p0.child("longitude").value}".toDouble()
-                    val latitude = "${p0.child("latitude").value}".toDouble()
-                    val text = "${p0.child("text").value}"
-
-                    tag.value = Tag(text, Position(longitude, latitude))
-                } else tag.value = null
-            }
-
-            override fun onCancelled(p0: DatabaseError) {
-                p0.toException().printStackTrace()
-            }
-        })
-
-        key(tag.value) {
-            val currentTag = tag.value
-            if (currentTag != null) {
-                val tagPainter = BitmapPainter(currentTag.text.toTagBitmap())
-                Marker("tag", tagPainter, currentTag.position, 10.5f) {
-                    selectTag.value = currentTag
-                    ClickResult.Consume
-                }
-            }
-        }
+        //My tag marker
+        TagMarker("my-tag", myReference.child("tag"), selectTag)
     }
 
     //Friends
@@ -513,6 +489,38 @@ fun Marker(
         minZoom = minZoom,
         onClick = onClick
     )
+}
+
+@Composable
+fun TagMarker(id: String, reference: DatabaseReference, selectTag: MutableState<Tag?>) {
+    val tag = remember { mutableStateOf<Tag?>(null) }
+
+    reference.addValueEventListener(object : ValueEventListener {
+        override fun onDataChange(p0: DataSnapshot) {
+            if (p0.exists() && p0.value != null) {
+                val longitude = "${p0.child("longitude").value}".toDouble()
+                val latitude = "${p0.child("latitude").value}".toDouble()
+                val text = "${p0.child("text").value}"
+
+                tag.value = Tag(text, Position(longitude, latitude))
+            } else tag.value = null
+        }
+
+        override fun onCancelled(p0: DatabaseError) {
+            p0.toException().printStackTrace()
+        }
+    })
+
+    key(tag.value) {
+        val currentTag = tag.value
+        if (currentTag != null) {
+            val tagPainter = BitmapPainter(currentTag.text.toTagBitmap())
+            Marker(id, tagPainter, currentTag.position, 10.5f) {
+                selectTag.value = currentTag
+                ClickResult.Consume
+            }
+        }
+    }
 }
 
 enum class AppDestinations(
